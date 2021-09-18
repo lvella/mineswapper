@@ -1,0 +1,8 @@
+[package]
+name = "non-deterministic-minesweeper"
+version = "0.1.0"
+authors = ["Lucas Clemente Vella <lvella@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+rand = "0.8.4"
