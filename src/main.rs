@@ -2,7 +2,8 @@ mod minefield;
 
 use minefield::Minefield;
 use std::time::{Instant, Duration};
-use iced::{executor, Application, Command, Clipboard, Element, Column, Row, Button, button, Text};
+use iced::{executor, Application, Command, Clipboard, Element, Column, Row, Button, button, Text, Space};
+use itertools::izip;
 
 enum GameState {
     BeforeStarted,
@@ -11,12 +12,23 @@ enum GameState {
 }
 
 #[derive(Debug, Clone)]
-struct Message {}
+enum Message {
+    Reveal(u8, u8),
+    Mark(u8, u8)
+}
 
 struct Minesweeper {
     minefield: Minefield,
     button_grid: Vec<Vec<button::State>>,
     state: GameState
+}
+
+fn create_button<'a>(state: &'a mut button::State, tile: &minefield::Tile) -> Button<'a, Message>
+{
+    match tile {
+        minefield::Tile::Hidden(_, _) => Button::new(state, Space::new(iced::Length::Fill, iced::Length::Fill)),
+        minefield::Tile::Revealed(clue) => Button::new(state, Text::new(clue.to_string())),
+    }
 }
 
 impl Application for Minesweeper {
@@ -43,19 +55,27 @@ impl Application for Minesweeper {
         String::from("Non-deterministic Minesweeper")
     }
 
-    fn update(&mut self, _message: Self::Message, _clipboard: &mut Clipboard) -> Command<Self::Message> {
+    fn update(&mut self, message: Self::Message, _clipboard: &mut Clipboard) -> Command<Self::Message> {
+        match message {
+            Message::Reveal(row, col) => {
+                if ! self.minefield.reveal(row, col) {
+                    println!("BOOOM!");
+                }
+            },
+            Message::Mark(row, col) => ()
+        };
         Command::none()
     }
 
     fn view(&mut self) -> Element<Self::Message> {
         let mut grid = Column::new();
-        for row in self.button_grid.iter_mut() {
+        for (row, states, tiles) in izip!(0.., self.button_grid.iter_mut(), self.minefield.grid.iter()) {
             let mut view_row = Row::new();
-            for button_state in row.iter_mut() {
-                view_row = view_row.push(Button::new(button_state, Text::new(""))
+            for (col, state, tile) in izip!(0.., states.iter_mut(), tiles.iter()) {
+                view_row = view_row.push(create_button(state, tile)
                     .width(iced::Length::Units(30))
                     .height(iced::Length::Units(30))
-                    .on_press(Message{}));
+                    .on_press(Message::Reveal(row, col)));
             }
             grid = grid.push(view_row);
         }
