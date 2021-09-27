@@ -8,6 +8,7 @@ edition = "2018"
 rand = "0.8.4"
 iced = "0.3"
 itertools = "0.10.1"
+bitvec = "0.22.3"
 
 [profile.release]
 lto = "thin"

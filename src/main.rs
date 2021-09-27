@@ -1,4 +1,5 @@
 mod minefield;
+mod search;
 
 use minefield::Minefield;
 use std::time::{Instant, Duration};
