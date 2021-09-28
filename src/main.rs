@@ -28,6 +28,35 @@ struct Minesweeper {
     state: GameState
 }
 
+struct RevealedStyle;
+
+impl RevealedStyle {
+    const WHITE_BG: Option<iced::Background> = Some(iced::Background::Color(iced::Color::WHITE));
+}
+
+impl button::StyleSheet for RevealedStyle {
+    fn active(&self) -> button::Style {
+        button::Style {
+            background: Self::WHITE_BG,
+            ..button::Style::default()
+        }
+    }
+
+    fn hovered(&self) -> button::Style {
+        button::Style {
+            background: Self::WHITE_BG,
+            ..self.active()
+        }
+    }
+
+    fn pressed(&self) -> button::Style {
+        button::Style {
+            background: Self::WHITE_BG,
+            ..self.hovered()
+        }
+    }
+}
+
 fn number_color(clue: u8) -> iced_native::Color
 {
     use iced_native::Color;
@@ -60,7 +89,7 @@ fn create_button<'a>(state: &'a mut button::State, tile: &minefield::Tile) -> Bu
         minefield::Tile::Revealed(clue) => Button::new(state, Text::new(clue.to_string())
             .horizontal_alignment(iced::HorizontalAlignment::Center)
             .color(number_color(*clue))
-        ),
+        ).style(RevealedStyle),
     }
 }
 
@@ -101,7 +130,8 @@ impl Application for Minesweeper {
     }
 
     fn view(&mut self) -> Element<Self::Message> {
-        let mut grid = Column::new();
+        // Minefield
+        let mut mf = Column::new();
         for (row, states, tiles) in izip!(0.., self.button_grid.iter_mut(), self.minefield.grid.iter()) {
             let mut view_row = Row::new();
             for (col, state, tile) in izip!(0.., states.iter_mut(), tiles.iter()) {
@@ -111,9 +141,27 @@ impl Application for Minesweeper {
                     .on_press(Message::Reveal(row, col)))
                     .on_right_click(Message::Mark(row, col)));
             }
-            grid = grid.push(view_row);
+            mf = mf.push(view_row);
         }
-        grid.into()
+
+        // Controls
+        let mut controls = Row::new();
+
+        // TODO: game control
+
+        // Main container
+        let main = Column::new()
+            .spacing(10)
+            .push(controls)
+            .push(mf);
+
+        // Aligner
+        iced::Container::new(main)
+            .width(iced::Length::Fill)
+            .height(iced::Length::Fill)
+            .align_x(iced::Align::Center)
+            .align_y(iced::Align::Center)
+            .into()
     }
 }
 
