@@ -1,10 +1,12 @@
 mod minefield;
 mod search;
+mod right_clickable;
 
 use minefield::Minefield;
 use std::time::{Instant, Duration};
 use iced::{executor, Application, Command, Clipboard, Element, Column, Row, Button, button, Text, Space, Svg};
 use itertools::izip;
+use right_clickable::RightClickable;
 
 thread_local!(static FLAG: iced::svg::Handle = iced::svg::Handle::from_path("resources/flag.svg"));
 
@@ -26,6 +28,26 @@ struct Minesweeper {
     state: GameState
 }
 
+fn number_color(clue: u8) -> iced_native::Color
+{
+    use iced_native::Color;
+
+    match clue {
+        0 => Color::WHITE,
+        1 => Color::from_rgb8(0x00, 0x00, 0xff),
+        2 => Color::from_rgb8(0x00, 0x80, 0x00),
+        3 => Color::from_rgb8(0xff, 0x00, 0x00),
+        4 => Color::from_rgb8(0x00, 0x00, 0x80),
+        5 => Color::from_rgb8(0x80, 0x00, 0x00),
+        6 => Color::from_rgb8(0x00, 0x80, 0x80),
+        7 => Color::BLACK,
+        8 => Color::from_rgb8(0x80, 0x80, 0x80),
+        _ => {
+            panic!("Invalid clue value: {}", clue);
+        }
+    }
+}
+
 fn create_button<'a>(state: &'a mut button::State, tile: &minefield::Tile) -> Button<'a, Message>
 {
     match tile {
@@ -34,8 +56,11 @@ fn create_button<'a>(state: &'a mut button::State, tile: &minefield::Tile) -> Bu
         minefield::Tile::Hidden(_, minefield::UserMarking::Flag) =>
             Button::new(state, Svg::new(FLAG.with(|f| f.clone()))),
         minefield::Tile::Hidden(_, minefield::UserMarking::QuestionMark) =>
-            Button::new(state, Text::new("?")),
-        minefield::Tile::Revealed(clue) => Button::new(state, Text::new(clue.to_string())),
+            Button::new(state, Text::new("?").horizontal_alignment(iced::HorizontalAlignment::Center)),
+        minefield::Tile::Revealed(clue) => Button::new(state, Text::new(clue.to_string())
+            .horizontal_alignment(iced::HorizontalAlignment::Center)
+            .color(number_color(*clue))
+        ),
     }
 }
 
@@ -80,10 +105,11 @@ impl Application for Minesweeper {
         for (row, states, tiles) in izip!(0.., self.button_grid.iter_mut(), self.minefield.grid.iter()) {
             let mut view_row = Row::new();
             for (col, state, tile) in izip!(0.., states.iter_mut(), tiles.iter()) {
-                view_row = view_row.push(create_button(state, tile)
+                view_row = view_row.push(RightClickable::new(create_button(state, tile)
                     .width(iced::Length::Units(30))
                     .height(iced::Length::Units(30))
-                    .on_press(Message::Mark(row, col)));
+                    .on_press(Message::Reveal(row, col)))
+                    .on_right_click(Message::Mark(row, col)));
             }
             grid = grid.push(view_row);
         }

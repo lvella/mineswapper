@@ -5,10 +5,12 @@ authors = ["Lucas Clemente Vella <lvella@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-rand = "0.8.4"
-iced = {version = "0.3", features = ["svg"]}
-itertools = "0.10.1"
 bitvec = "0.22.3"
+delegate = "0.6.1"
+iced = {version = "0.3", features = ["svg"]}
+iced_native = "0.4"
+itertools = "0.10.1"
+rand = "0.8.4"
 
 [profile.release]
 lto = "thin"
