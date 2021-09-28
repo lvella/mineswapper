@@ -75,6 +75,17 @@ impl Minefield {
         }
     }
 
+    pub fn switch_mark(&mut self, row: u8, col: u8)
+    {
+        if let Tile::Hidden(_, mark) = self.get_mut(row, col) {
+            *mark = match mark {
+                UserMarking::None => UserMarking::Flag,
+                UserMarking::Flag => UserMarking::QuestionMark,
+                UserMarking::QuestionMark => UserMarking::None
+            }
+        }
+    }
+
     fn get_mut(&mut self, row: u8, col: u8) -> &mut Tile
     {
         &mut self.grid[usize::from(row)][usize::from(col)]

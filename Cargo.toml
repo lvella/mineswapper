@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 rand = "0.8.4"
-iced = "0.3"
+iced = {version = "0.3", features = ["svg"]}
 itertools = "0.10.1"
 bitvec = "0.22.3"
 

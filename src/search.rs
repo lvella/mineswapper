@@ -61,17 +61,25 @@ fn find_solutions(topology: &Topology) -> VecDeque::<bv::BitVec>
 fn is_last_possible(topology: &Topology, to_clues: &[u16], sol: &bv::BitVec) -> bool
 {
     for clue_idx in to_clues {
-        let mut counted = 0;
+        let mut mine_count = 0;
+        let mut unknown_count = 0;
         let clue = &topology.clues[*clue_idx as usize];
         for unk_idx in &clue.adjacency {
             if let Some(is_mine) = sol.get(*unk_idx as usize) {
                 if *is_mine {
-                    counted += 1;
-                    if counted > clue.mine_count {
+                    mine_count += 1;
+                    if mine_count > clue.mine_count {
+                        // More mines than needed, impossible
                         return false;
                     }
                 }
+            } else {
+                unknown_count += 1;
             }
+        }
+        if unknown_count + mine_count < clue.mine_count {
+            // Not enough mines to fulfill the clue, impossible
+            return false;
         }
     }
     true
