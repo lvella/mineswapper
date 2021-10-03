@@ -22,6 +22,55 @@ pub enum Tile {
     Revealed(u8)
 }
 
+struct NeighborIter
+{
+    width: u8,
+    height: u8,
+    row: u8,
+    col: u8,
+    i: u8
+}
+
+impl NeighborIter
+{
+    const DELTAS: [(i16, i16); 8] = [
+        (-1, -1), (-1, 0), (-1, 1),
+        ( 0, -1),          ( 0, 1),
+        ( 1, -1), ( 1, 0), ( 1, 1)
+    ];
+}
+
+impl Iterator for NeighborIter
+{
+    type Item = (u8, u8);
+
+    fn next(&mut self) -> Option<Self::Item>
+    {
+        while self.i < 8 {
+            let (dr, dc) = Self::DELTAS[self.i as usize];
+            self.i += 1;
+
+            let row = dr + i16::from(self.row);
+            if row < 0 || row >= i16::from(self.height) {
+                continue;
+            }
+
+            let col = dc + i16::from(self.col);
+            if col < 0 || col >= i16::from(self.width) {
+                continue;
+            }
+
+            return Some((row as u8, col as u8));
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>)
+    {
+        (3, Some(8))
+    }
+}
+
 pub struct Minefield {
     pub grid: Vec<Vec<Tile>>,
     pub width: u8,
@@ -67,9 +116,9 @@ impl Minefield {
             // it would only work if there is the exact number of flags around a
             // revealed clue, sometimes saving the player.
             // TODO: maybe implement the forgiving behavior of other implementations
-            Tile::Revealed(_) => self.neighbor_coords(row, col).iter().fold(true,
-                |value, (row, col)| match self.get(*row, *col) {
-                    Tile::Hidden(_, _) => self.reveal(*row, *col),
+            Tile::Revealed(_) => self.neighbor_coords(row, col).fold(true,
+                |value, (row, col)| match self.get(row, col) {
+                    Tile::Hidden(_, _) => self.reveal(row, col),
                     Tile::Revealed(_) => true
                 } && value
             )
@@ -97,26 +146,9 @@ impl Minefield {
         &self.grid[usize::from(row)][usize::from(col)]
     }
 
-    fn neighbor_coords(&self, row: u8, col: u8) -> Vec<(u8, u8)>
+    fn neighbor_coords(&self, row: u8, col: u8) -> NeighborIter
     {
-        const DELTAS: [(i16, i16); 8] = [
-            (-1, -1), (-1, 0), (-1, 1),
-            ( 0, -1),          ( 0, 1),
-            ( 1, -1), ( 1, 0), ( 1, 1)
-        ];
-        DELTAS.iter().filter_map(|(dr, dc)| {
-            let row = dr + i16::from(row);
-            if row < 0 || row >= i16::from(self.height) {
-                return None;
-            }
-
-            let col = dc + i16::from(col);
-            if col < 0 || col >= i16::from(self.width) {
-                return None;
-            }
-
-            Some((row as u8, col as u8))
-        }).collect()
+        NeighborIter{width: self.width, height: self.height, row, col, i: 0}
     }
 
     fn recursive_reveal(&mut self, row: u8, col: u8)
@@ -138,8 +170,8 @@ impl Minefield {
 
     fn count_neighbor_bombs(&self, row: u8, col: u8) -> u8
     {
-        self.neighbor_coords(row, col).iter().fold(0, |accum, (row, col)| {
-            accum + match self.get(*row, *col) {
+        self.neighbor_coords(row, col).fold(0, |accum, (row, col)| {
+            accum + match self.get(row, col) {
                 Tile::Hidden(Content::Mine, _) => 1,
                 _ => 0
             }
