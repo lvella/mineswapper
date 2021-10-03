@@ -111,17 +111,25 @@ impl Minefield {
                 true
             }
 
-            // The following is too harsh, because it will try to reveal all the hidden
-            // squares around a revealed clue. For others minesweeper implementations,
-            // it would only work if there is the exact number of flags around a
-            // revealed clue, sometimes saving the player.
-            // TODO: maybe implement the forgiving behavior of other implementations
-            Tile::Revealed(_) => self.neighbor_coords(row, col).fold(true,
-                |value, (row, col)| match self.get(row, col) {
-                    Tile::Hidden(_, _) => self.reveal(row, col),
-                    Tile::Revealed(_) => true
-                } && value
-            )
+            Tile::Revealed(count) => {
+                // Only reveal neighbors if there is the exact number
+                // of flags around the clue
+                if *count == self.neighbor_coords(row, col).fold(0,
+                    |sum, (row, col)| sum + match self.get(row, col) {
+                        Tile::Hidden(_, UserMarking::Flag) => 1,
+                        _ => 0
+                    }
+                ) {
+                    // Reveal unflagged neighbor clues
+                    self.neighbor_coords(row, col).fold(true,
+                        |survived, (row, col)| match self.get(row, col) {
+                            Tile::Hidden(_, _) => self.reveal(row, col),
+                            Tile::Revealed(_) => true
+                    } && survived)
+                } else {
+                    true
+                }
+            }
         }
     }
 
