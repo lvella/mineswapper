@@ -24,22 +24,23 @@ pub enum Tile {
 
 pub struct Minefield {
     pub grid: Vec<Vec<Tile>>,
-    width: u8,
-    height: u8
+    pub width: u8,
+    pub height: u8,
+    pub mine_count: u16
 }
 
 impl Minefield {
     pub fn create_random(width: u8, height: u8, mine_count: u16) -> Minefield {
         let swidth = usize::from(width);
         let total_size = swidth * usize::from(height);
-        let mine_count = usize::from(mine_count);
+        let smine_count = usize::from(mine_count);
 
-        if mine_count > total_size {
+        if smine_count > total_size {
             panic!("More mines than it fits in the field!");
         }
 
         let mut flattened = vec![
-            Tile::Hidden(Content::Mine, UserMarking::None); mine_count
+            Tile::Hidden(Content::Mine, UserMarking::None); smine_count
         ];
         flattened.resize(total_size, Tile::Hidden(Content::Empty, UserMarking::None));
 
@@ -47,7 +48,7 @@ impl Minefield {
 
         Minefield {
             grid: flattened.chunks(swidth).map(|x| x.to_vec()).collect(),
-            width, height
+            width, height, mine_count
         }
     }
 

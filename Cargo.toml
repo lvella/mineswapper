@@ -11,6 +11,8 @@ iced = {version = "0.3", features = ["svg"]}
 iced_native = "0.4"
 itertools = "0.10.1"
 rand = "0.8.4"
+strum = "0.21"
+strum_macros = "0.21"
 
 [profile.release]
 lto = "thin"

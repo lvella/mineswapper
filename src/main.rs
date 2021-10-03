@@ -7,25 +7,173 @@ use std::time::{Instant, Duration};
 use iced::{executor, Application, Command, Clipboard, Element, Column, Row, Button, button, Text, Space, Svg};
 use itertools::izip;
 use right_clickable::RightClickable;
+use strum_macros;
 
 thread_local!(static FLAG: iced::svg::Handle = iced::svg::Handle::from_path("resources/flag.svg"));
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, strum_macros::EnumIter)]
+enum DifficultyLevels {
+    Beginner,
+    Intermediate,
+    Expert
+}
+
+impl DifficultyLevels {
+    fn rows(self) -> u8
+    {
+        match self {
+            Self::Beginner => 9,
+            Self::Intermediate => 16,
+            Self::Expert => 16
+        }
+    }
+
+    fn cols(self) -> u8
+    {
+        match self {
+            Self::Beginner => 9,
+            Self::Intermediate => 16,
+            Self::Expert => 30
+        }
+    }
+
+    fn mines(self) -> u16
+    {
+        match self {
+            Self::Beginner => 10,
+            Self::Intermediate => 40,
+            Self::Expert => 99
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+struct Settings {
+    rows_slider: iced::slider::State,
+    cols_slider: iced::slider::State,
+    mines_slider: iced::slider::State,
+    width: u8,
+    height: u8,
+    mine_count: u16
+}
+
+impl Settings {
+    fn new(width: u8, height: u8, mine_count: u16) -> Self
+    {
+        let mut new = Settings {
+            rows_slider: iced::slider::State::new(),
+            cols_slider: iced::slider::State::new(),
+            mines_slider: iced::slider::State::new(),
+            width: 0,
+            height: 0,
+            mine_count: 0,
+        };
+        new.update(width, height, mine_count);
+        
+        new
+    }
+
+    fn max_mines(self) -> u16 {
+        self.height as u16 * self.width as u16 - 1
+    }
+
+    fn update(&mut self, width: u8, height: u8, mine_count: u16)
+    {
+        self.width = width;
+        self.height = height;
+        
+        self.mine_count = std::cmp::min(mine_count, self.max_mines());
+    }
+
+    fn view(&mut self)
+        -> Element<Message>
+    {
+        let selected = {
+            let mut selected = None;
+            for level in <DifficultyLevels as strum::IntoEnumIterator>::iter() {
+                if level.rows() == self.height
+                    && level.cols() == self.width
+                    && level.mines() == self.mine_count {
+                        selected = Some(level);
+                        break;
+                }
+            }
+            selected
+        };
+
+        let preset = |level: DifficultyLevels| Message::DefineSettings{
+            width: level.cols(),
+            height: level.rows(),
+            mine_count: level.mines(),
+            apply: true
+        };
+
+        let presets = iced::Column::new()
+            .push(iced::Radio::new(DifficultyLevels::Beginner,
+                "Beginner", selected, preset))
+            .push(iced::Radio::new(DifficultyLevels::Intermediate,
+                "Itermediate", selected, preset))
+            .push(iced::Radio::new(DifficultyLevels::Expert,
+                "Expert", selected, preset));
+
+        let labels = iced::Column::new()
+                .push(Text::new("Rows:"))
+                .push(Text::new("Columns:"))
+                .push(Text::new("Mines:"));
+
+        let width = self.width;
+        let height = self.height;
+        let mine_count = self.mine_count;
+
+        let max_mines = self.max_mines();
+
+        let sliders = iced::Column::new()
+            .push(iced::Slider::new(&mut self.rows_slider, 2..=255,
+                    self.height,
+                    move |height| Message::DefineSettings{width, height, mine_count, apply: false})
+                    .on_release(Message::ApplySettings))
+            .push(iced::Slider::new(&mut self.cols_slider, 2..=255,
+                    self.width as u8,
+                    move |width| Message::DefineSettings{width, height, mine_count, apply: false})
+                    .on_release(Message::ApplySettings))
+            .push(iced::Slider::new(&mut self.mines_slider, 1..=max_mines,
+                    self.mine_count,
+                    move |mine_count| Message::DefineSettings{width, height, mine_count, apply: false})
+                    .on_release(Message::ApplySettings))
+            .width(iced::Length::Fill);
+
+        let descriptions = iced::Column::new()
+                .push(Text::new(format!("{} rows", height)))
+                .push(Text::new(format!("{} columns", width)))
+                .push(Text::new(format!("{} mines in {} cells, {:3.1} %",
+                    mine_count, max_mines + 1,
+                    (100 * mine_count) as f32 / (max_mines + 1) as f32)));
+
+        iced::Row::new()
+            .push(presets)
+            .push(labels)
+            .push(sliders)
+            .push(descriptions)
+            .spacing(10)
+            .padding(20)
+            .into()
+    }
+}
+
+#[derive(Copy, Clone)]
 enum GameState {
-    BeforeStarted,
+    BeforeStarted(Settings),
     Running{start_time: Instant},
-    EndGame{game_duration: Duration}
+    Lost,
+    Won{game_duration: Duration}
 }
 
 #[derive(Debug, Clone)]
 enum Message {
+    DefineSettings{width: u8, height: u8, mine_count: u16, apply: bool},
+    ApplySettings,
     Reveal(u8, u8),
     Mark(u8, u8)
-}
-
-struct Minesweeper {
-    minefield: Minefield,
-    button_grid: Vec<Vec<button::State>>,
-    state: GameState
 }
 
 struct RevealedStyle;
@@ -93,22 +241,34 @@ fn create_button<'a>(state: &'a mut button::State, tile: &minefield::Tile) -> Bu
     }
 }
 
+struct Minesweeper {
+    minefield: Minefield,
+    button_grid: Vec<Vec<button::State>>,
+    state: GameState
+}
+
+impl Minesweeper {
+    fn new(settings: Settings) -> Self
+    {
+        let size = usize::from(settings.width) * usize::from(settings.height);
+        Self {
+            minefield: Minefield::create_random(settings.width, settings.height, settings.mine_count),
+            button_grid: vec![button::State::new(); size]
+                .chunks(usize::from(settings.width)).map(|x| x.to_vec()).collect(),
+            state: GameState::BeforeStarted(settings)
+        }
+    }
+}
+
 impl Application for Minesweeper {
     type Message = Message;
     type Executor = executor::Default;
     type Flags = ();
 
     fn new(_flags: ()) -> (Self, Command<Message>) {
-        const WIDTH: u8 = 30;
-        const HEIGHT: u8 = 16;
-        let size = usize::from(WIDTH) * usize::from(HEIGHT);
+        const DEFAULT: DifficultyLevels = DifficultyLevels::Expert;
         (
-            Self {
-                minefield: Minefield::create_random(WIDTH, HEIGHT, 99),
-                button_grid: vec![button::State::new(); size]
-                    .chunks(usize::from(WIDTH)).map(|x| x.to_vec()).collect(),
-                state: GameState::BeforeStarted
-            },
+            Self::new(Settings::new(DEFAULT.cols(), DEFAULT.rows(), DEFAULT.mines())),
             Command::none()
         )
     }
@@ -119,6 +279,23 @@ impl Application for Minesweeper {
 
     fn update(&mut self, message: Self::Message, _clipboard: &mut Clipboard) -> Command<Self::Message> {
         match message {
+            Message::DefineSettings{width, height, mine_count, apply} => {
+                if let GameState::BeforeStarted(settings) = &mut self.state {
+                    settings.update(width, height, mine_count);
+                    if apply {
+                        *self = Minesweeper::new(*settings);
+                    }
+                } else {
+                    panic!("We should only get settings message before started!");
+                }
+            },
+            Message::ApplySettings => {
+                if let GameState::BeforeStarted(settings) = &self.state {
+                    *self = Minesweeper::new(*settings);
+                } else {
+                    panic!("We should only get settings message before started!");
+                }
+            },
             Message::Reveal(row, col) => {
                 if ! self.minefield.reveal(row, col) {
                     println!("BOOOM!");
@@ -132,35 +309,38 @@ impl Application for Minesweeper {
     fn view(&mut self) -> Element<Self::Message> {
         // Minefield
         let mut mf = Column::new();
-        for (row, states, tiles) in izip!(0.., self.button_grid.iter_mut(), self.minefield.grid.iter()) {
+        for (row, states, tiles) in izip!(0u16.., self.button_grid.iter_mut(), self.minefield.grid.iter()) {
             let mut view_row = Row::new();
-            for (col, state, tile) in izip!(0.., states.iter_mut(), tiles.iter()) {
+            for (col, state, tile) in izip!(0u16.., states.iter_mut(), tiles.iter()) {
                 view_row = view_row.push(RightClickable::new(create_button(state, tile)
                     .width(iced::Length::Units(30))
                     .height(iced::Length::Units(30))
-                    .on_press(Message::Reveal(row, col)))
-                    .on_right_click(Message::Mark(row, col)));
+                    .on_press(Message::Reveal(row as u8, col as u8)))
+                    .on_right_click(Message::Mark(row as u8, col as u8)));
             }
             mf = mf.push(view_row);
         }
 
         // Controls
-        let mut controls = Row::new();
-
-        // TODO: game control
-
-        // Main container
-        let main = Column::new()
-            .spacing(10)
-            .push(controls)
-            .push(mf);
+        let mut controls = match &mut self.state {
+            GameState::BeforeStarted(controls) => controls.view(),
+            //GameState::Running{start_time} => running_controls(start_time),
+            //GameState::Lost => lost_controls(),
+            //GameState::Won{game_duration} => won_controls(game_duration)
+            _ => iced::Row::new().into()
+        };
 
         // Aligner
-        iced::Container::new(main)
+        let aligner = iced::Container::new(mf)
             .width(iced::Length::Fill)
             .height(iced::Length::Fill)
             .align_x(iced::Align::Center)
-            .align_y(iced::Align::Center)
+            .align_y(iced::Align::Start);
+
+        // Main container
+        Column::new()
+            .push(controls)
+            .push(aligner)
             .into()
     }
 }
