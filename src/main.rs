@@ -164,8 +164,7 @@ impl Settings {
 enum GameState {
     BeforeStarted(Settings),
     Running{start_time: Instant},
-    Lost,
-    Won{game_duration: Duration}
+    Finished{game_duration: Duration, won: bool}
 }
 
 #[derive(Debug, Clone)]
@@ -297,11 +296,26 @@ impl Application for Minesweeper {
                 }
             },
             Message::Reveal(row, col) => {
-                if ! self.minefield.reveal(row, col) {
-                    println!("BOOOM!");
+                if let GameState::BeforeStarted(_) = self.state {
+                    self.state = GameState::Running{start_time: Instant::now()};
+                }
+
+                if let GameState::Running{start_time} = self.state {
+                    if ! self.minefield.reveal(row, col) {
+                        let game_duration = Instant::now() - start_time;
+                        self.state = GameState::Finished{game_duration, won: false};
+                        println!("You lost. Game duration: {:0.06} seconds", game_duration.as_secs_f64());
+                    }
+                    // TODO: implment game win.
                 }
             },
-            Message::Mark(row, col) => self.minefield.switch_mark(row, col)
+            Message::Mark(row, col) => {
+                match self.state {
+                    GameState::BeforeStarted(_) | GameState::Running{start_time: _} =>
+                        self.minefield.switch_mark(row, col),
+                    _ => {}
+                }
+            }
         };
         Command::none()
     }
