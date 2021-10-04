@@ -1,5 +1,4 @@
 use rand::{thread_rng, seq};
-use crate::search;
 
 #[derive(Copy, Clone)]
 pub enum UserMarking
@@ -75,7 +74,9 @@ pub struct Minefield {
     pub grid: Vec<Vec<Tile>>,
     pub width: u8,
     pub height: u8,
-    pub mine_count: u16
+    pub mine_count: u16,
+    pub flag_count: u16,
+    pub revealed_count: u16
 }
 
 impl Minefield {
@@ -97,7 +98,7 @@ impl Minefield {
 
         Minefield {
             grid: flattened.chunks(swidth).map(|x| x.to_vec()).collect(),
-            width, height, mine_count
+            width, height, mine_count, flag_count: 0, revealed_count: 0
         }
     }
 
@@ -136,12 +137,26 @@ impl Minefield {
     pub fn switch_mark(&mut self, row: u8, col: u8)
     {
         if let Tile::Hidden(_, mark) = self.get_mut(row, col) {
+            let mut flag_change = 0i32;
             *mark = match mark {
-                UserMarking::None => UserMarking::Flag,
-                UserMarking::Flag => UserMarking::QuestionMark,
+                UserMarking::None => {
+                    flag_change = 1;
+                    UserMarking::Flag
+                },
+                UserMarking::Flag => {
+                    flag_change = -1;
+                    UserMarking::QuestionMark
+                },
                 UserMarking::QuestionMark => UserMarking::None
-            }
+            };
+
+            self.flag_count = (self.flag_count as i32 + flag_change) as u16;
         }
+    }
+
+    pub fn is_all_revealed(&self) -> bool
+    {
+        self.revealed_count + self.mine_count == self.width as u16 * self.height as u16
     }
 
     fn get_mut(&mut self, row: u8, col: u8) -> &mut Tile
@@ -165,6 +180,7 @@ impl Minefield {
             Tile::Hidden(Content::Empty, _) => {
                 let bomb_count = self.count_neighbor_bombs(row, col);
                 (*self.get_mut(row, col)) = Tile::Revealed(bomb_count);
+                self.revealed_count += 1;
                 if bomb_count == 0 {
                     for (row, col) in self.neighbor_coords(row, col) {
                         self.recursive_reveal(row, col);

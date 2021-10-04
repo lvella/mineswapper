@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 bitvec = "0.22.3"
 delegate = "0.6.1"
-iced = {version = "0.3", features = ["svg"]}
+iced = {version = "0.3", features = ["svg", "tokio"]}
 iced_native = "0.4"
 itertools = "0.10.1"
 rand = "0.8.4"

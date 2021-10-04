@@ -69,11 +69,12 @@ impl Settings {
             mine_count: 0,
         };
         new.update(width, height, mine_count);
-        
+
         new
     }
 
-    fn max_mines(self) -> u16 {
+    fn max_mines(self) -> u16
+    {
         self.height as u16 * self.width as u16 - 1
     }
 
@@ -81,12 +82,11 @@ impl Settings {
     {
         self.width = width;
         self.height = height;
-        
+
         self.mine_count = std::cmp::min(mine_count, self.max_mines());
     }
 
-    fn view(&mut self)
-        -> Element<Message>
+    fn view(&mut self) -> Element<Message>
     {
         let selected = {
             let mut selected = None;
@@ -155,7 +155,91 @@ impl Settings {
             .push(sliders)
             .push(descriptions)
             .spacing(10)
-            .padding(20)
+            .into()
+    }
+}
+
+#[derive(Copy, Clone)]
+struct RunningView
+{
+    restart_button: button::State,
+    start_time: Instant
+}
+
+impl RunningView {
+    fn new() -> Self
+    {
+        RunningView{
+            start_time: Instant::now(),
+            restart_button: button::State::new()
+        }
+    }
+
+    fn view(&mut self, minefield: & minefield::Minefield) -> Element<Message>
+    {
+        let delta = Instant::now() - self.start_time;
+
+        let info = iced::Column::new()
+            .spacing(10)
+            .width(iced::Length::Fill)
+            .push(iced::Row::new()
+                .push(Svg::new(FLAG.with(|f| f.clone())).height(iced::Length::Units(25)))
+                .push(iced::Text::new(format!(": {}/{}", minefield.flag_count, minefield.mine_count))))
+            .push(iced::Text::new(
+                format!("Ellapsed time: {} seconds", delta.as_secs())));
+
+        let button = iced::Button::new(&mut self.restart_button, iced::Text::new("Restart"))
+            .on_press(Message::Restart);
+
+        iced::Row::new()
+            .push(info)
+            .push(button)
+            .into()
+    }
+}
+
+#[derive(Copy, Clone)]
+struct EndGameView {
+    restart_button: button::State,
+    game_duration: Duration,
+    won: bool
+}
+
+impl EndGameView {
+    fn new(start_time: Instant, won: bool) -> Self
+    {
+        let game_duration = Instant::now() - start_time;
+
+        Self{
+            restart_button: button::State::new(),
+            game_duration, won
+        }
+    }
+
+    fn view(&mut self, minefield: & minefield::Minefield) -> Element<Message>
+    {
+        let info = iced::Column::new()
+            .spacing(10)
+            .width(iced::Length::Fill)
+            .push(iced::Row::new()
+                .push(Svg::new(FLAG.with(|f| f.clone())).height(iced::Length::Units(25)))
+                .push(iced::Text::new(format!(": {}/{}", minefield.flag_count, minefield.mine_count))))
+            .push(iced::Text::new(
+                format!("Game time: {:0.06} seconds", self.game_duration.as_secs_f64())))
+            .push(iced::Text::new(
+                if self.won {
+                    "😄 You won! Congratulations!"
+                } else {
+                    "😖 You lost! Try again..."
+                }
+            ).size(40));
+
+        let button = iced::Button::new(&mut self.restart_button, iced::Text::new("Restart"))
+            .on_press(Message::Restart);
+
+        iced::Row::new()
+            .push(info)
+            .push(button)
             .into()
     }
 }
@@ -163,14 +247,16 @@ impl Settings {
 #[derive(Copy, Clone)]
 enum GameState {
     BeforeStarted(Settings),
-    Running{start_time: Instant},
-    Finished{game_duration: Duration, won: bool}
+    Running(RunningView),
+    Finished(EndGameView)
 }
 
 #[derive(Debug, Clone)]
 enum Message {
     DefineSettings{width: u8, height: u8, mine_count: u16, apply: bool},
     ApplySettings,
+    Restart,
+    Tick,
     Reveal(u8, u8),
     Mark(u8, u8)
 }
@@ -295,29 +381,38 @@ impl Application for Minesweeper {
                     panic!("We should only get settings message before started!");
                 }
             },
+            Message::Restart => {
+                *self = Self::new(Settings::new(self.minefield.width, self.minefield.height, self.minefield.mine_count));
+            }
             Message::Reveal(row, col) => {
                 if let GameState::BeforeStarted(_) = self.state {
-                    self.state = GameState::Running{start_time: Instant::now()};
+                    self.state = GameState::Running(RunningView::new());
                 }
 
-                if let GameState::Running{start_time} = self.state {
-                    if ! self.minefield.reveal(row, col) {
-                        let game_duration = Instant::now() - start_time;
-                        self.state = GameState::Finished{game_duration, won: false};
-                        println!("You lost. Game duration: {:0.06} seconds", game_duration.as_secs_f64());
+                if let GameState::Running(running) = self.state {
+                    let has_lost = !self.minefield.reveal(row, col);
+                    let has_won = !has_lost && self.minefield.is_all_revealed();
+
+                    if has_lost || has_won {
+                        self.state = GameState::Finished(EndGameView::new(running.start_time, has_won));
                     }
-                    // TODO: implment game win.
                 }
             },
             Message::Mark(row, col) => {
                 match self.state {
-                    GameState::BeforeStarted(_) | GameState::Running{start_time: _} =>
+                    GameState::BeforeStarted(_) | GameState::Running(_) =>
                         self.minefield.switch_mark(row, col),
                     _ => {}
                 }
-            }
+            },
+            _ => {}
         };
         Command::none()
+    }
+
+    fn subscription(&self) -> iced::Subscription<Message> {
+        iced::time::every(std::time::Duration::from_millis(500))
+            .map(|_| Message::Tick)
     }
 
     fn view(&mut self) -> Element<Self::Message> {
@@ -336,13 +431,11 @@ impl Application for Minesweeper {
         }
 
         // Controls
-        let mut controls = match &mut self.state {
+        let controls = iced::Container::new(match &mut self.state {
             GameState::BeforeStarted(controls) => controls.view(),
-            //GameState::Running{start_time} => running_controls(start_time),
-            //GameState::Lost => lost_controls(),
-            //GameState::Won{game_duration} => won_controls(game_duration)
-            _ => iced::Row::new().into()
-        };
+            GameState::Running(running) => running.view(&self.minefield),
+            GameState::Finished(end_game) => end_game.view(&self.minefield),
+        }).height(iced::Length::Units(150)).padding(20);
 
         // Aligner
         let aligner = iced::Container::new(mf)
