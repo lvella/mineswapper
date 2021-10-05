@@ -1,4 +1,5 @@
 use rand::{thread_rng, seq};
+use super::neighbor_iter::NeighborIterable;
 
 #[derive(Copy, Clone)]
 pub enum UserMarking
@@ -19,55 +20,6 @@ pub enum Content
 pub enum Tile {
     Hidden(Content, UserMarking),
     Revealed(u8)
-}
-
-struct NeighborIter
-{
-    width: u8,
-    height: u8,
-    row: u8,
-    col: u8,
-    i: u8
-}
-
-impl NeighborIter
-{
-    const DELTAS: [(i16, i16); 8] = [
-        (-1, -1), (-1, 0), (-1, 1),
-        ( 0, -1),          ( 0, 1),
-        ( 1, -1), ( 1, 0), ( 1, 1)
-    ];
-}
-
-impl Iterator for NeighborIter
-{
-    type Item = (u8, u8);
-
-    fn next(&mut self) -> Option<Self::Item>
-    {
-        while self.i < 8 {
-            let (dr, dc) = Self::DELTAS[self.i as usize];
-            self.i += 1;
-
-            let row = dr + i16::from(self.row);
-            if row < 0 || row >= i16::from(self.height) {
-                continue;
-            }
-
-            let col = dc + i16::from(self.col);
-            if col < 0 || col >= i16::from(self.width) {
-                continue;
-            }
-
-            return Some((row as u8, col as u8));
-        }
-        None
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>)
-    {
-        (3, Some(8))
-    }
 }
 
 pub struct Minefield {
@@ -115,14 +67,14 @@ impl Minefield {
             Tile::Revealed(count) => {
                 // Only reveal neighbors if there is the exact number
                 // of flags around the clue
-                if *count == self.neighbor_coords(row, col).fold(0,
+                if *count == self.neighbors_of(row, col).fold(0,
                     |sum, (row, col)| sum + match self.get(row, col) {
                         Tile::Hidden(_, UserMarking::Flag) => 1,
                         _ => 0
                     }
                 ) {
                     // Reveal unflagged neighbor clues
-                    self.neighbor_coords(row, col).fold(true,
+                    self.neighbors_of(row, col).fold(true,
                         |survived, (row, col)| match self.get(row, col) {
                             Tile::Hidden(_, _) => self.reveal(row, col),
                             Tile::Revealed(_) => true
@@ -169,11 +121,6 @@ impl Minefield {
         &self.grid[usize::from(row)][usize::from(col)]
     }
 
-    fn neighbor_coords(&self, row: u8, col: u8) -> NeighborIter
-    {
-        NeighborIter{width: self.width, height: self.height, row, col, i: 0}
-    }
-
     fn recursive_reveal(&mut self, row: u8, col: u8)
     {
         match *self.get(row, col) {
@@ -182,7 +129,7 @@ impl Minefield {
                 (*self.get_mut(row, col)) = Tile::Revealed(bomb_count);
                 self.revealed_count += 1;
                 if bomb_count == 0 {
-                    for (row, col) in self.neighbor_coords(row, col) {
+                    for (row, col) in self.neighbors_of(row, col) {
                         self.recursive_reveal(row, col);
                     }
                 };
@@ -194,11 +141,23 @@ impl Minefield {
 
     fn count_neighbor_bombs(&self, row: u8, col: u8) -> u8
     {
-        self.neighbor_coords(row, col).fold(0, |accum, (row, col)| {
+        self.neighbors_of(row, col).fold(0, |accum, (row, col)| {
             accum + match self.get(row, col) {
                 Tile::Hidden(Content::Mine, _) => 1,
                 _ => 0
             }
         })
+    }
+}
+
+impl NeighborIterable for Minefield {
+    fn width(&self) -> u8
+    {
+        self.width
+    }
+
+    fn height(&self) -> u8
+    {
+        self.height
     }
 }
