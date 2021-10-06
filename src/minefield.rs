@@ -1,5 +1,6 @@
 use rand::{thread_rng, seq};
 use super::neighbor_iter::NeighborIterable;
+use super::solver::PartialSolution;
 
 #[derive(Copy, Clone)]
 pub enum UserMarking
@@ -28,7 +29,8 @@ pub struct Minefield {
     pub height: u8,
     pub mine_count: u16,
     pub flag_count: u16,
-    pub revealed_count: u16
+    pub revealed_count: u16,
+    sol: PartialSolution,
 }
 
 impl Minefield {
@@ -48,15 +50,19 @@ impl Minefield {
 
         seq::SliceRandom::shuffle(&mut flattened[..], &mut thread_rng());
 
+        let sol = PartialSolution::new(width, height);
+        sol.print();
+
         Minefield {
             grid: flattened.chunks(swidth).map(|x| x.to_vec()).collect(),
-            width, height, mine_count, flag_count: 0, revealed_count: 0
+            width, height, mine_count, flag_count: 0, revealed_count: 0,
+            sol
         }
     }
 
     pub fn reveal(&mut self, row: u8, col: u8) -> bool
     {
-        match self.get(row, col) {
+        let ret = match self.get(row, col) {
             Tile::Hidden(_, UserMarking::Flag) => true,
             Tile::Hidden(Content::Mine, _) => false,
             Tile::Hidden(Content::Empty, _) => {
@@ -83,7 +89,10 @@ impl Minefield {
                     true
                 }
             }
-        }
+        };
+
+        self.sol.print();
+        ret
     }
 
     pub fn switch_mark(&mut self, row: u8, col: u8)
@@ -126,7 +135,10 @@ impl Minefield {
         match *self.get(row, col) {
             Tile::Hidden(Content::Empty, _) => {
                 let bomb_count = self.count_neighbor_bombs(row, col);
+
                 (*self.get_mut(row, col)) = Tile::Revealed(bomb_count);
+                self.sol.add_clue((row, col), bomb_count);
+
                 self.revealed_count += 1;
                 if bomb_count == 0 {
                     for (row, col) in self.neighbors_of(row, col) {

@@ -1,6 +1,6 @@
 mod minefield;
 mod neighbor_iter;
-mod graph;
+mod solver;
 mod search;
 mod right_clickable;
 

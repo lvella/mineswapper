@@ -15,14 +15,14 @@ enum CellState {
     Clue(u8),
 }
 
-struct Solution {
+pub struct PartialSolution {
     grid: Vec<Vec<CellState>>,
     width: u8,
     height: u8,
     unconstrained_count: u16
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 enum UpdateAction {
     CheckIfClueFindMines,
     ToMine,
@@ -30,7 +30,7 @@ enum UpdateAction {
     ToEmpty
 }
 
-impl Solution {
+impl PartialSolution {
     pub fn new(width: u8, height: u8) -> Self
     {
         Self{
@@ -104,7 +104,7 @@ impl Solution {
 
             let mut try_enqueue = |key, action| {
                 if is_queued.insert(key) {
-                    queue.push_front((key, action));
+                    queue.push_back((key, action));
                 }
             };
 
@@ -149,6 +149,9 @@ impl Solution {
                                 if *val == 0 {
                                     // A clue can only get to zero once,
                                     // so it can not be inserted twice:
+                                    for e in &queue {
+                                        println!("### {:?}", e);
+                                    }
                                     assert!(is_queued.insert((row, col)));
                                     queue.push_back(((row, col), UpdateAction::CheckIfClueFindEmpties));
                                 }
@@ -181,7 +184,7 @@ impl Solution {
                     for (row, col) in self.neighbors_of(row, col) {
                         match self.get(row, col) {
                             CellState::Clue(val) if *val > 0 => {
-
+                                try_enqueue((row, col), UpdateAction::CheckIfClueFindMines)
                             },
                             _ => ()
                         }
@@ -200,9 +203,36 @@ impl Solution {
     {
         &self.grid[usize::from(row)][usize::from(col)]
     }
+
+    pub fn print(&self) {
+        print!("\n");
+        for row in &self.grid {
+            for cell in row {
+                print!("{}", cell);
+            }
+            print!("\n");
+        }
+        print!("\n");
+    }
 }
 
-impl NeighborIterable for Solution {
+impl std::fmt::Display for CellState {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let val = match self {
+            CellState::Clue(val) if *val > 0u8 => val.to_string(),
+            _ => String::from(match self {
+                CellState::Empty => "E",
+                CellState::Mine => "M",
+                CellState::UnknownConstrained => "C",
+                CellState::UnknownUnconstrained => "U",
+                CellState::Clue(_) => " ",
+            })
+        };
+        f.write_str(val.as_str())
+    }
+}
+
+impl NeighborIterable for PartialSolution {
     fn width(&self) -> u8
     {
         self.width
