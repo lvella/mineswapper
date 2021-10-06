@@ -1,5 +1,6 @@
 use std::collections::{VecDeque, HashMap, HashSet};
 use std::iter::FromIterator;
+use arrayvec::ArrayVec;
 use super::neighbor_iter::NeighborIterable;
 
 type Key = (u8, u8);
@@ -21,6 +22,14 @@ struct Solution {
     unconstrained_count: u16
 }
 
+#[derive(Copy, Clone)]
+enum UpdateAction {
+    CheckIfClueFindMines,
+    ToMine,
+    CheckIfClueFindEmpties,
+    ToEmpty
+}
+
 impl Solution {
     pub fn new(width: u8, height: u8) -> Self
     {
@@ -35,20 +44,32 @@ impl Solution {
     {
         let state = &mut self.grid[row as usize][col as usize];
 
-        // Sanity check:
+        // Check if we previously knew if the cell was empty,
+        // and possibly update the state before anything else.
         match state {
             CellState::Clue(_) => panic!("Can't add clue to a revealed square!"),
             CellState::Mine => panic!("Can't add clue to a hidden mine!"),
+            CellState::UnknownConstrained => {
+                // We didn't knew this was empty, so we
+                // must update the neighboring cells.
+                self.breadth_first_update(UpdateAction::ToEmpty, &[(row, col)]);
+            },
             _ => {}
         }
+
+        let mut unknowns = ArrayVec::<Key, 8>::new();
 
         // Mark neighbors as constrained and check for known mines:
         for (row, col) in self.neighbors_of(row, col) {
             let cell = &mut self.grid[row as usize][col as usize];
-            match cell {
+            match *cell {
                 CellState::UnknownUnconstrained => {
                     *cell = CellState::UnknownConstrained;
                     self.unconstrained_count -= 1;
+                    unknowns.push((row, col));
+                },
+                CellState::UnknownConstrained => {
+                    unknowns.push((row, col));
                 },
                 CellState::Mine => {
                     clue -= 1;
@@ -60,75 +81,64 @@ impl Solution {
         // Set the state of the new clue cell:
         self.grid[row as usize][col as usize] = CellState::Clue(clue);
 
-        // Update the solution, starting from the newly revealed clue
-
-        // TODO: to be continued...
-        // below is all wrong. If clue == 0, must CheckIfClueFindEmpties,
-        // If clue > 0, must CheckIfClueFindMines
-        // Not sure about the neighbors.
-        //if clue != 0 {
-            // All the Clues > 0 neighbors, plus itself:
-        //    let affected_clues: Vec<Key> = self.neighbors_of(row, col)
-        //        .filter(|(row, col)| match self.get(*row, *col) {
-        //            CellState::Clue(val) if *val > 0u8 => true,
-        //            _ => false
-        //        }).chain([(row, col)]).collect();
-
-        //    self.breadth_first_update(affected_clues);
-        //}
+        // Update the solution, changing unknown neighbors to either Empty or Mines, as appropriate.
+        if unknowns.len() > 0 {
+            let slice = unknowns.as_slice();
+            if clue == 0 {
+                self.breadth_first_update(UpdateAction::ToEmpty, slice);
+            } else if clue == unknowns.len() as u8 {
+                self.breadth_first_update(UpdateAction::ToMine, slice);
+            }
+        }
     }
 
-    fn breadth_first_update(&mut self, seed: impl IntoIterator<Item=Key>)
-    {
-        enum Action {
-            CheckIfClueFindMines,
-            ToMine,
-            CheckIfClueFindEmpties,
-            ToEmpty
-        }
 
-        let mut is_visited: HashSet<Key> = HashSet::from_iter(seed);
-        let mut queue: VecDeque<(Key, Action)> = is_visited.iter()
-            .map(|key| (*key, Action::CheckIfClueFindMines)).collect();
+    fn breadth_first_update(&mut self, action: UpdateAction, seed: &[Key])
+    {
+        let mut is_queued: HashSet<Key> = HashSet::from_iter(seed.iter().copied());
+        let mut queue: VecDeque<(Key, UpdateAction)> = is_queued.iter()
+            .map(|key| (*key, action)).collect();
 
         while let Some(((row, col), action)) = queue.pop_front() {
+            is_queued.remove(&(row, col));
+
             let mut try_enqueue = |key, action| {
-                if !is_visited.contains(&key) {
+                if is_queued.insert(key) {
                     queue.push_front((key, action));
                 }
             };
 
             match action {
-                Action::CheckIfClueFindMines => {
-                    let saturated = if let CellState::Clue(clue) = self.get(row, col) {
-                        let mut unk_count = 0u8;
-                        for (row, col) in self.neighbors_of(row, col) {
-                            unk_count += match self.get(row, col) {
-                                CellState::UnknownConstrained => 1,
-                                CellState::UnknownUnconstrained =>
-                                    panic!("Can't have unconstrained next to a clue!"),
-                                _ => 0
-                            }
-                        }
-
-                        assert!(unk_count <= *clue);
-                        unk_count == *clue
+                UpdateAction::CheckIfClueFindMines => {
+                    let clue = if let CellState::Clue(clue) = self.get(row, col) {
+                        *clue
                     } else {
                         panic!("Must be a clue!");
                     };
 
-                    if saturated {
+                    let mut unknowns = ArrayVec::<Key, 8>::new();
+
+                    for (row, col) in self.neighbors_of(row, col) {
+                        match self.get(row, col) {
+                            CellState::UnknownConstrained => unknowns.push((row, col)),
+                            CellState::UnknownUnconstrained =>
+                                panic!("Can't have unconstrained next to a clue!"),
+                            _ => ()
+                        }
+                    }
+
+                    assert!(unknowns.len() as u8 >= clue);
+
+                    if unknowns.len() as u8 == clue {
                         *self.get_mut(row, col) = CellState::Clue(0);
 
-                        for (row, col) in self.neighbors_of(row, col) {
-                            if let CellState::UnknownConstrained = self.get(row, col) {
-                                try_enqueue((row, col), Action::ToMine);
-                            }
+                        for (row, col) in unknowns {
+                            try_enqueue((row, col), UpdateAction::ToMine);
                         }
                     }
                 },
 
-                Action::ToMine => {
+                UpdateAction::ToMine => {
                     assert!(matches!(self.get(row, col), CellState::UnknownConstrained));
                     *self.get_mut(row, col) = CellState::Mine;
 
@@ -136,15 +146,47 @@ impl Solution {
                         match self.get_mut(row, col) {
                             CellState::Clue(val) if *val > 0 => {
                                 *val -= 1;
-                                // TODO: to be continued...
-                                // enqueue Clue(0)
+                                if *val == 0 {
+                                    // A clue can only get to zero once,
+                                    // so it can not be inserted twice:
+                                    assert!(is_queued.insert((row, col)));
+                                    queue.push_back(((row, col), UpdateAction::CheckIfClueFindEmpties));
+                                }
                             },
                             _ => ()
                         }
                     }
                 },
 
-                // TODO: to be continued...
+                UpdateAction::CheckIfClueFindEmpties => {
+                    // You can only get empties from a 0 clue:
+                    assert!(matches!(self.get(row, col), CellState::Clue(0)));
+
+                    for (row, col) in self.neighbors_of(row, col) {
+                        match self.get(row, col) {
+                            CellState::UnknownConstrained =>
+                                try_enqueue((row, col), UpdateAction::ToEmpty),
+                            CellState::UnknownUnconstrained =>
+                                panic!("Can't have unconstrained next to a clue!"),
+                            _ => ()
+                        }
+                    }
+                },
+
+                UpdateAction::ToEmpty => {
+                    // Only constrained can be found to be empty:
+                    assert!(matches!(self.get(row, col), CellState::UnknownConstrained));
+                    *self.get_mut(row, col) = CellState::Empty;
+
+                    for (row, col) in self.neighbors_of(row, col) {
+                        match self.get(row, col) {
+                            CellState::Clue(val) if *val > 0 => {
+
+                            },
+                            _ => ()
+                        }
+                    }
+                }
             }
         }
     }
