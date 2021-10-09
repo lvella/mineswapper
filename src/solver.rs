@@ -1,7 +1,9 @@
-use std::collections::{VecDeque, HashMap, HashSet};
+use std::collections::{VecDeque, HashSet, HashMap};
 use std::iter::FromIterator;
 use arrayvec::ArrayVec;
+use bitvec::prelude as bv;
 use super::neighbor_iter::NeighborIterable;
+use super::search;
 
 type Key = (u8, u8);
 
@@ -194,6 +196,85 @@ impl PartialSolution {
         }
     }
 
+    pub fn find_solutions(&self)
+    {
+        let mut visited = vec![bv::bitvec![0; self.width as usize]; self.height as usize];
+
+        for (i, row) in self.grid.iter().enumerate() {
+            for (j, cell) in row.iter().enumerate() {
+                let visited = visited[i].get_mut(j).unwrap();
+                if *visited {
+                    continue;
+                }
+                visited.set(true);
+
+                match cell {
+                    CellState::Clue(val) if *val > 0 => {
+                        // TODO: to be continued...
+                    },
+                    _ => ()
+                }
+            }
+        }
+    }
+
+    fn extract_graph_starting_from(&self, row: u8, col: u8, visited: &mut [bv::BitVec]) ->
+        (HashMap::<Key, u16>, search::Topology)
+    {
+        // Start search
+        let mut queue = VecDeque::new();
+        queue.push_back((row, col));
+
+        // Maps of keys to the local 0-based indices of unknowns:
+        let mut unk_map = HashMap::<Key, u16>::new();
+
+        // List of clues part of this graph:
+        let mut clues = Vec::<search::Clue>::new();
+
+        // Breadth-first search
+        while let Some((row, col)) = queue.pop_front() {
+            let mut try_enqueue = |row, col| {
+                let visited = visited[row as usize].get_mut(col as usize).unwrap();
+                if *visited {
+                    visited.set(true);
+                    queue.push_back((row, col));
+                }
+            };
+
+            match self.get(row, col) {
+                CellState::Clue(val) => {
+                    assert!(*val > 0u8);
+
+                    let mut adjacency = Vec::new();
+                    for (row, col) in self.neighbors_of(row, col) {
+                        if let CellState::UnknownConstrained = self.get(row, col) {
+                            let len = unk_map.len() as u16;
+                            let unk_id = *unk_map.entry((row, col)).or_insert(len);
+                            adjacency.push(unk_id);
+
+                            try_enqueue(row, col);
+                        }
+                    }
+
+                    clues.push(search::Clue{mine_count: *val, adjacency});
+                },
+                CellState::UnknownConstrained => {
+                    for (row, col) in self.neighbors_of(row, col) {
+                        if let CellState::Clue(val) = self.get(row, col) {
+                            if *val > 0u8 {
+                                try_enqueue(row, col);
+                            }
+                        }
+                    }
+                },
+                _ => panic!("Only constrained unknowns and clues must be part of graph")
+            }
+        }
+
+        let unknown_count = unk_map.len() as u16;
+        (unk_map, search::Topology{unknown_count, clues})
+    }
+
     fn get_mut(&mut self, row: u8, col: u8) -> &mut CellState
     {
         &mut self.grid[usize::from(row)][usize::from(col)]
@@ -241,11 +322,4 @@ impl NeighborIterable for PartialSolution {
     {
         self.height
     }
-}
-
-#[derive(Default)]
-struct BipartiteGraph
-{
-    clues: HashMap<Key, (u8, HashSet<Key>)>,
-    unknowns: HashMap<Key, HashSet<Key>>
 }

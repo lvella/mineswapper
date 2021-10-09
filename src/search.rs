@@ -1,14 +1,14 @@
 use bitvec::prelude as bv;
 use std::collections::VecDeque;
 
-struct Clue {
-    mine_count: u8,
-    adjacency: Vec<u16>
+pub struct Clue {
+    pub mine_count: u8,
+    pub adjacency: Vec<u16>
 }
 
-struct Topology {
-    unknown_count: u16,
-    clues: Vec<Clue>
+pub struct Topology {
+    pub unknown_count: u16,
+    pub clues: Vec<Clue>
 }
 
 fn find_solutions(topology: &Topology) -> VecDeque::<bv::BitVec>
