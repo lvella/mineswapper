@@ -9,7 +9,6 @@ type Key = (u8, u8);
 
 #[derive(Copy, Clone)]
 enum CellState {
-    // TODO: ensure that two flavors of unconstrained is really necessary
     UnknownUnconstrained,
     UnknownConstrained,
     Mine,
@@ -17,11 +16,17 @@ enum CellState {
     Clue(u8),
 }
 
+struct GraphSolution {
+    tile_map: HashMap<Key, u16>,
+    alternatives: VecDeque::<bv::BitVec>
+}
+
 pub struct PartialSolution {
     grid: Vec<Vec<CellState>>,
     width: u8,
     height: u8,
-    unconstrained_count: u16
+    unconstrained_count: u16,
+    graphs_solutions: Vec<GraphSolution>
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -38,7 +43,7 @@ impl PartialSolution {
         Self{
             grid: vec![vec![CellState::UnknownUnconstrained; width as usize]; height as usize],
             unconstrained_count: width as u16 * height as u16,
-            width, height
+            width, height, graphs_solutions: Vec::new()
         }
     }
 
@@ -93,7 +98,6 @@ impl PartialSolution {
             }
         }
     }
-
 
     fn breadth_first_update(&mut self, action: UpdateAction, seed: &[Key])
     {
@@ -151,9 +155,6 @@ impl PartialSolution {
                                 if *val == 0 {
                                     // A clue can only get to zero once,
                                     // so it can not be inserted twice:
-                                    for e in &queue {
-                                        println!("### {:?}", e);
-                                    }
                                     assert!(is_queued.insert((row, col)));
                                     queue.push_back(((row, col), UpdateAction::CheckIfClueFindEmpties));
                                 }
@@ -196,26 +197,33 @@ impl PartialSolution {
         }
     }
 
-    pub fn find_solutions(&self)
+    pub fn find_graph_solutions(&mut self)
     {
         let mut visited = vec![bv::bitvec![0; self.width as usize]; self.height as usize];
 
+        let mut graphs_solutions = Vec::new();
         for (i, row) in self.grid.iter().enumerate() {
             for (j, cell) in row.iter().enumerate() {
-                let visited = visited[i].get_mut(j).unwrap();
-                if *visited {
+                let cell_visited = visited[i].get_mut(j).unwrap();
+                if *cell_visited {
                     continue;
                 }
-                visited.set(true);
 
                 match cell {
                     CellState::Clue(val) if *val > 0 => {
-                        // TODO: to be continued...
+                        cell_visited.set(true);
+
+                        let (tile_map, topology) =
+                            self.extract_graph_starting_from(i as u8, j as u8, &mut visited[..]);
+                        let alternatives = search::find_solutions(&topology);
+                        graphs_solutions.push(GraphSolution{tile_map, alternatives});
                     },
                     _ => ()
                 }
             }
         }
+
+        self.graphs_solutions = graphs_solutions;
     }
 
     fn extract_graph_starting_from(&self, row: u8, col: u8, visited: &mut [bv::BitVec]) ->
@@ -235,7 +243,7 @@ impl PartialSolution {
         while let Some((row, col)) = queue.pop_front() {
             let mut try_enqueue = |row, col| {
                 let visited = visited[row as usize].get_mut(col as usize).unwrap();
-                if *visited {
+                if !*visited {
                     visited.set(true);
                     queue.push_back((row, col));
                 }
@@ -286,12 +294,32 @@ impl PartialSolution {
     }
 
     pub fn print(&self) {
+        let mut map = HashMap::new();
+        for (i, gs) in self.graphs_solutions.iter().enumerate() {
+            for key in gs.tile_map.keys() {
+                assert!(!map.contains_key(key));
+                map.insert(key, i);
+            }
+        }
+
         print!("\n");
-        for row in &self.grid {
-            for cell in row {
-                print!("{}", cell);
+        for (i, row) in self.grid.iter().enumerate() {
+            for (j, cell) in row.iter().enumerate() {
+                if let CellState::UnknownConstrained = cell {
+                    print!("\u{20dd}{}", map.get(&(i as u8, j as u8)).unwrap());
+                } else {
+                    print!("{}", cell);
+                }
             }
             print!("\n");
+        }
+        print!("\n");
+
+        for (i, gs) in self.graphs_solutions.iter().enumerate() {
+            println!("{}:", i);
+            for s in &gs.alternatives {
+                println!("  {}", s);
+            }
         }
         print!("\n");
     }

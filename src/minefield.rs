@@ -62,10 +62,13 @@ impl Minefield {
 
     pub fn reveal(&mut self, row: u8, col: u8) -> bool
     {
+        let mut was_something_revealed = false;
+
         let ret = match self.get(row, col) {
             Tile::Hidden(_, UserMarking::Flag) => true,
             Tile::Hidden(Content::Mine, _) => false,
             Tile::Hidden(Content::Empty, _) => {
+                was_something_revealed = true;
                 self.recursive_reveal(row, col);
                 true
             }
@@ -82,7 +85,13 @@ impl Minefield {
                     // Reveal unflagged neighbor clues
                     self.neighbors_of(row, col).fold(true,
                         |survived, (row, col)| match self.get(row, col) {
-                            Tile::Hidden(_, _) => self.reveal(row, col),
+                            Tile::Hidden(_, UserMarking::Flag) => true,
+                            Tile::Hidden(Content::Mine, _) => false,
+                            Tile::Hidden(Content::Empty, _) => {
+                                was_something_revealed = true;
+                                self.recursive_reveal(row, col);
+                                true
+                            },
                             Tile::Revealed(_) => true
                     } && survived)
                 } else {
@@ -91,7 +100,16 @@ impl Minefield {
             }
         };
 
-        self.sol.print();
+        // Update the solver only if something changed:
+        if was_something_revealed {
+            let begin = std::time::Instant::now();
+            self.sol.find_graph_solutions();
+            let delta = std::time::Instant::now() - begin;
+            println!("Search time: {:0.09}", delta.as_secs_f64());
+
+            self.sol.print();
+        }
+
         ret
     }
 

@@ -11,7 +11,7 @@ pub struct Topology {
     pub clues: Vec<Clue>
 }
 
-fn find_solutions(topology: &Topology) -> VecDeque::<bv::BitVec>
+pub fn find_solutions(topology: &Topology) -> VecDeque::<bv::BitVec>
 {
     // Create a reverse map of unknows to the clues:
     let unknowns_to_clues = {
@@ -29,6 +29,7 @@ fn find_solutions(topology: &Topology) -> VecDeque::<bv::BitVec>
     let mut solutions = VecDeque::<bv::BitVec>::new();
     solutions.push_back(bv::BitVec::new());
 
+    let mut test_count = 0;
     loop {
         if let Some(mut sol) = solutions.pop_front() {
             if sol.len() >= topology.unknown_count as usize {
@@ -49,11 +50,15 @@ fn find_solutions(topology: &Topology) -> VecDeque::<bv::BitVec>
             if is_last_possible(&topology, to_clues, &sol) {
                 solutions.push_back(sol);
             }
+
+            test_count += 2;
         } else {
             // Since the list is empty, solution is impossible.
             break;
         }
     }
+
+    println!("Tests count: {}", test_count);
 
     solutions
 }
