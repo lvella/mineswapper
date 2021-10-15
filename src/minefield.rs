@@ -50,7 +50,7 @@ impl Minefield {
 
         seq::SliceRandom::shuffle(&mut flattened[..], &mut thread_rng());
 
-        let sol = PartialSolution::new(width, height);
+        let sol = PartialSolution::new(width, height, mine_count);
         sol.print();
 
         Minefield {
@@ -62,46 +62,20 @@ impl Minefield {
 
     pub fn reveal(&mut self, row: u8, col: u8) -> bool
     {
-        let mut was_something_revealed = false;
+        let cells = self.find_revealed_cells(row, col, true);
+        let was_something_revealed = cells.len() > 0;
 
-        let ret = match self.get(row, col) {
-            Tile::Hidden(_, UserMarking::Flag) => true,
-            Tile::Hidden(Content::Mine, _) => false,
-            Tile::Hidden(Content::Empty, _) => {
-                was_something_revealed = true;
-                self.recursive_reveal(row, col);
-                true
-            }
+        let had_mine = cells.iter().any(|&(_,_,mine)| mine);
+        let survived = !had_mine || self.try_reacomodate(cells.iter()
+            .map(|&(row, col, _)| (row, col)));
 
-            Tile::Revealed(count) => {
-                // Only reveal neighbors if there is the exact number
-                // of flags around the clue
-                if *count == self.neighbors_of(row, col).fold(0,
-                    |sum, (row, col)| sum + match self.get(row, col) {
-                        Tile::Hidden(_, UserMarking::Flag) => 1,
-                        _ => 0
-                    }
-                ) {
-                    // Reveal unflagged neighbor clues
-                    self.neighbors_of(row, col).fold(true,
-                        |survived, (row, col)| match self.get(row, col) {
-                            Tile::Hidden(_, UserMarking::Flag) => true,
-                            Tile::Hidden(Content::Mine, _) => false,
-                            Tile::Hidden(Content::Empty, _) => {
-                                was_something_revealed = true;
-                                self.recursive_reveal(row, col);
-                                true
-                            },
-                            Tile::Revealed(_) => true
-                    } && survived)
-                } else {
-                    true
-                }
-            }
-        };
+        // Independently of surviving, reveal what is revealable:
+        for (row, col, _) in cells {
+            self.recursive_reveal(row, col);
+        }
 
         // Update the solver only if something changed:
-        if was_something_revealed {
+        if survived && was_something_revealed {
             let begin = std::time::Instant::now();
             self.sol.find_graph_solutions();
             let delta = std::time::Instant::now() - begin;
@@ -110,7 +84,7 @@ impl Minefield {
             self.sol.print();
         }
 
-        ret
+        survived
     }
 
     pub fn switch_mark(&mut self, row: u8, col: u8)
@@ -148,6 +122,41 @@ impl Minefield {
         &self.grid[usize::from(row)][usize::from(col)]
     }
 
+    fn find_revealed_cells(&self, row: u8, col: u8, process_revealed: bool)
+        -> Vec<(u8, u8, bool)>
+    {
+        match self.get(row, col) {
+            Tile::Hidden(_, UserMarking::Flag) => Vec::new(),
+            Tile::Hidden(Content::Mine, _) => vec![(row, col, true)],
+            Tile::Hidden(Content::Empty, _) => vec![(row, col, false)],
+            Tile::Revealed(count) => {
+                // Only reveal neighbors if there is the exact number
+                // of flags around the clue
+                if process_revealed && *count == self.neighbors_of(row, col).fold(0,
+                    |sum, (row, col)| sum + match self.get(row, col) {
+                        Tile::Hidden(_, UserMarking::Flag) => 1,
+                        _ => 0
+                    }
+                ) {
+                    // Reveal unflagged neighbos
+                    self.neighbors_of(row, col).fold(Vec::new(),
+                        |mut acum, (row, col)| {
+                            acum.append(&mut self.find_revealed_cells(row, col, false));
+                            acum
+                        })
+                } else {
+                    Vec::new()
+                }
+            }
+        }
+    }
+
+    fn try_reacomodate(&mut self, revealed: impl IntoIterator<Item = (u8, u8)>) -> bool
+    {
+        let new_organization = self.sol.find_acomodating_solution(revealed);
+        // TODO: change the minefield with the new_organization
+    }
+
     fn recursive_reveal(&mut self, row: u8, col: u8)
     {
         match *self.get(row, col) {
@@ -164,7 +173,7 @@ impl Minefield {
                     }
                 };
             },
-            Tile::Hidden(Content::Mine, _) => panic!("A mine should never be revealed!"),
+            // TODO: reveal mine to display to the player the reason of losing
             _ => ()
         }
     }

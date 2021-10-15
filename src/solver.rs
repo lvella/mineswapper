@@ -2,6 +2,7 @@ use std::collections::{VecDeque, HashSet, HashMap};
 use std::iter::FromIterator;
 use arrayvec::ArrayVec;
 use bitvec::prelude as bv;
+use itertools::izip;
 use super::neighbor_iter::NeighborIterable;
 use super::search;
 
@@ -25,6 +26,7 @@ pub struct PartialSolution {
     grid: Vec<Vec<CellState>>,
     width: u8,
     height: u8,
+    remaining_mine_count: u16,
     unconstrained_count: u16,
     graphs_solutions: Vec<GraphSolution>
 }
@@ -37,13 +39,54 @@ enum UpdateAction {
     ToEmpty
 }
 
+struct CartesianProduct<'a, T>
+{
+    curr: Vec<usize>,
+    basis: Vec<Vec<&'a T>>
+}
+
+impl<'a, T> CartesianProduct<'a, T>
+{
+    fn new(basis: impl IntoIterator<Item = impl IntoIterator<Item = &'a T>>) -> Self
+    {
+        let basis: Vec<Vec<&'a T>> =
+            basis.into_iter().map(|v| v.into_iter().collect()).collect();
+        Self {
+            curr: vec![0; basis.len()],
+            basis
+        }
+    }
+}
+
+impl<'a, T> Iterator for CartesianProduct<'a, T>
+{
+    type Item = Vec<&'a T>;
+
+    fn next(&mut self) -> Option<Self::Item>
+    {
+        let curr = self.curr.clone();
+
+        for (val, v) in izip!(self.curr.iter_mut(), self.basis.iter()) {
+            *val += 1;
+            if *val != v.len() {
+                return Some(curr.iter().enumerate()
+                    .map(|(i, val)| self.basis[i][*val]).collect());
+            }
+            
+            *val = 0;
+        }
+
+        None
+    }
+}
+
 impl PartialSolution {
-    pub fn new(width: u8, height: u8) -> Self
+    pub fn new(width: u8, height: u8, mine_count: u16) -> Self
     {
         Self{
             grid: vec![vec![CellState::UnknownUnconstrained; width as usize]; height as usize],
             unconstrained_count: width as u16 * height as u16,
-            width, height, graphs_solutions: Vec::new()
+            width, height, remaining_mine_count: mine_count, graphs_solutions: Vec::new()
         }
     }
 
@@ -147,6 +190,7 @@ impl PartialSolution {
                 UpdateAction::ToMine => {
                     assert!(matches!(self.get(row, col), CellState::UnknownConstrained));
                     *self.get_mut(row, col) = CellState::Mine;
+                    self.remaining_mine_count -= 1;
 
                     for (row, col) in self.neighbors_of(row, col) {
                         match self.get_mut(row, col) {
@@ -293,6 +337,64 @@ impl PartialSolution {
         &self.grid[usize::from(row)][usize::from(col)]
     }
 
+    pub fn find_acomodating_solution(&mut self, revealed: impl IntoIterator<Item = (u8, u8)>)
+        -> Option<Vec<(u8, u8, bool)>>
+    {
+        // TODO: handle click on unconstrained squares...
+        for key in revealed {
+            for sol in self.graphs_solutions.iter() {
+                if let Some(idx) = sol.tile_map.get(&key) {
+                    // Delete every alternative who has a mine at idx:
+                    sol.alternatives.retain(|&alt| !alt[*idx as usize]);
+                    if sol.alternatives.len() == 0 {
+                        return None;
+                    }
+                }
+            }
+        }
+
+        // Count the number of mines in each solution for each graph:
+        let mine_counts: Vec<HashMap<u16, Vec<&bv::BitVec>>> =
+            self.graphs_solutions.iter().map(|sol| {
+                let counts: HashMap<u16, Vec<&bv::BitVec>> = HashMap::new();
+                for alt in sol.alternatives.iter()
+                {
+                    let count = alt.count_ones() as u16;
+                    counts.entry(count).or_default().push(alt);
+                }
+                counts
+            }).collect();
+
+        let combinations = Vec::from_iter(
+            CartesianProduct::new(mine_counts.iter().map(|x| x.keys()))
+                .filter(|comb| {
+                    let total = comb.iter().map(|v| **v).sum();
+
+                    // Do we have enough remaining mines to satisfy this
+                    // combination of solutions?
+                    if self.remaining_mine_count < total {
+                        return false;
+                    }
+
+                    // Do we have enough unconstrained squares to fit all
+                    // the mines left over from this solution?
+                    if self.unconstrained_count < self.remaining_mine_count - total {
+                        return false;
+                    } 
+
+                    true
+                })
+        );
+
+        // TODO: calculate the probability of each combination actually happening,
+        // so that we have the weights to randomly select one solution. 
+
+        // TODO: to be continued...
+        // use cross_produce to count viable solutions
+
+        None
+    }
+
     pub fn print(&self) {
         let mut map = HashMap::new();
         for (i, gs) in self.graphs_solutions.iter().enumerate() {
@@ -315,13 +417,13 @@ impl PartialSolution {
         }
         print!("\n");
 
-        for (i, gs) in self.graphs_solutions.iter().enumerate() {
-            println!("{}:", i);
-            for s in &gs.alternatives {
-                println!("  {}", s);
-            }
-        }
-        print!("\n");
+    //    for (i, gs) in self.graphs_solutions.iter().enumerate() {
+    //        println!("{}:", i);
+    //        for s in &gs.alternatives {
+    //            println!("  {}", s);
+    //        }
+    //    }
+    //    print!("\n");
     }
 }
 
