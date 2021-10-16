@@ -3,6 +3,7 @@ use std::iter::FromIterator;
 use arrayvec::ArrayVec;
 use bitvec::prelude as bv;
 use itertools::izip;
+use rand;
 use super::neighbor_iter::NeighborIterable;
 use super::search;
 
@@ -39,17 +40,17 @@ enum UpdateAction {
     ToEmpty
 }
 
-struct CartesianProduct<'a, T>
+struct CartesianProduct<T>
 {
     curr: Vec<usize>,
-    basis: Vec<Vec<&'a T>>
+    basis: Vec<Vec<T>>
 }
 
-impl<'a, T> CartesianProduct<'a, T>
+impl<T> CartesianProduct<T>
 {
-    fn new(basis: impl IntoIterator<Item = impl IntoIterator<Item = &'a T>>) -> Self
+    fn new(basis: impl IntoIterator<Item = impl IntoIterator<Item = T>>) -> Self
     {
-        let basis: Vec<Vec<&'a T>> =
+        let basis: Vec<Vec<T>> =
             basis.into_iter().map(|v| v.into_iter().collect()).collect();
         Self {
             curr: vec![0; basis.len()],
@@ -58,25 +59,31 @@ impl<'a, T> CartesianProduct<'a, T>
     }
 }
 
-impl<'a, T> Iterator for CartesianProduct<'a, T>
+impl<T> Iterator for CartesianProduct<T>
+where T: Copy
 {
-    type Item = Vec<&'a T>;
+    type Item = Vec<T>;
 
     fn next(&mut self) -> Option<Self::Item>
     {
-        let curr = self.curr.clone();
+        if self.curr.len() == 0 {
+            return None;
+        }
+        let ret = Some(self.curr.iter().enumerate().map(|(i, val)| self.basis[i][*val]).collect());
 
         for (val, v) in izip!(self.curr.iter_mut(), self.basis.iter()) {
             *val += 1;
             if *val != v.len() {
-                return Some(curr.iter().enumerate()
-                    .map(|(i, val)| self.basis[i][*val]).collect());
+                return ret;
             }
             
             *val = 0;
         }
 
-        None
+        // All combinations have been generated, so stop execution in next iteration.
+        self.curr.clear();
+
+        ret
     }
 }
 
@@ -104,6 +111,11 @@ impl PartialSolution {
                 // must update the neighboring cells.
                 self.breadth_first_update(UpdateAction::ToEmpty, &[(row, col)]);
             },
+            CellState::UnknownUnconstrained => {
+                // Newly revealed cell will replace the unconstrained, so we
+                // must decrease the count.
+                self.unconstrained_count -= 1;
+            }
             _ => {}
         }
 
@@ -319,7 +331,7 @@ impl PartialSolution {
                         }
                     }
                 },
-                _ => panic!("Only constrained unknowns and clues must be part of graph")
+                _ => panic!("Only constrained unknowns and clues must be part of a graph")
             }
         }
 
@@ -337,26 +349,58 @@ impl PartialSolution {
         &self.grid[usize::from(row)][usize::from(col)]
     }
 
-    pub fn find_acomodating_solution(&mut self, revealed: impl IntoIterator<Item = (u8, u8)>)
-        -> Option<Vec<(u8, u8, bool)>>
+    /// Tries to find a valid configuration where all cells in "reveal" are empty.
+    ///
+    /// self is modified assuming this function will succeed, so in case of return false,
+    /// this partial solution should no longer be used.
+    pub fn find_acomodating_solution(
+        &mut self,
+        revealed: impl IntoIterator<Item = (u8, u8)>,
+        mut reconfigure_tile: impl FnMut(u8, u8, bool)
+    ) -> bool
     {
-        // TODO: handle click on unconstrained squares...
+        let mut unconstrained_revealed = Vec::new();
+
         for key in revealed {
-            for sol in self.graphs_solutions.iter() {
-                if let Some(idx) = sol.tile_map.get(&key) {
-                    // Delete every alternative who has a mine at idx:
-                    sol.alternatives.retain(|&alt| !alt[*idx as usize]);
-                    if sol.alternatives.len() == 0 {
-                        return None;
+            let cell = self.get_mut(key.0, key.1);
+            match cell {
+                CellState::UnknownConstrained => {
+                    // Linear search through all the graphs (because there can't be many)
+                    // for the one containing the key.
+                    for sol in self.graphs_solutions.iter_mut() {
+                        if let Some(idx) = sol.tile_map.get(&key) {
+                            // Delete every alternative who has a mine at idx:
+                            sol.alternatives.retain(|alt| !alt[*idx as usize]);
+                            if sol.alternatives.len() == 0 {
+                                return false;
+                            }
+
+                            // Each key can be in at most 1 graph, so there is no
+                            // need to search the others
+                            break;
+                        }
                     }
-                }
+                },
+                CellState::UnknownUnconstrained => {
+                    // Each unconstrained cell revealed
+                    // reduces 1 possible mine location
+                    unconstrained_revealed.push(key);
+                    *cell = CellState::Empty;
+                },
+                CellState::Mine => {
+                    return false;
+                },
+                CellState::Clue(_) => panic!("Tried to reveal an already revealed cell."),
+                CellState::Empty => ()
             }
         }
+
+        self.unconstrained_count -= unconstrained_revealed.len() as u16;
 
         // Count the number of mines in each solution for each graph:
         let mine_counts: Vec<HashMap<u16, Vec<&bv::BitVec>>> =
             self.graphs_solutions.iter().map(|sol| {
-                let counts: HashMap<u16, Vec<&bv::BitVec>> = HashMap::new();
+                let mut counts: HashMap<u16, Vec<&bv::BitVec>> = HashMap::new();
                 for alt in sol.alternatives.iter()
                 {
                     let count = alt.count_ones() as u16;
@@ -366,33 +410,73 @@ impl PartialSolution {
             }).collect();
 
         let combinations = Vec::from_iter(
-            CartesianProduct::new(mine_counts.iter().map(|x| x.keys()))
-                .filter(|comb| {
-                    let total = comb.iter().map(|v| **v).sum();
+            CartesianProduct::new(
+                mine_counts.iter().map(|x| x.keys().copied())
+            ).filter(|comb| {
+                let total = comb.iter().map(|v| *v).sum();
 
-                    // Do we have enough remaining mines to satisfy this
-                    // combination of solutions?
-                    if self.remaining_mine_count < total {
-                        return false;
-                    }
+                // Do we have enough remaining mines to satisfy this
+                // combination of solutions?
+                if self.remaining_mine_count < total {
+                    return false;
+                }
 
-                    // Do we have enough unconstrained squares to fit all
-                    // the mines left over from this solution?
-                    if self.unconstrained_count < self.remaining_mine_count - total {
-                        return false;
-                    } 
+                // Do we have enough unconstrained squares to fit all
+                // the mines left over from this solution?
+                if self.unconstrained_count < self.remaining_mine_count - total {
+                    return false;
+                } 
 
-                    true
-                })
+                true
+            })
         );
 
         // TODO: calculate the probability of each combination actually happening,
         // so that we have the weights to randomly select one solution. 
+        // For now, just sample uniformly from the combinations, and then sample
+        // uniformly from graph solutions that makes up the combination:
+        use rand::seq::SliceRandom;
+        let mut replaced_mines = 0u16;
+        if let Some(combination) = combinations.as_slice().choose(&mut rand::thread_rng()) {
+            // Reconfigure constrained tiles
+            for (mine_count, sols_per_count, graph) in
+                izip!(combination, &mine_counts, &self.graphs_solutions)
+            {
+                replaced_mines += mine_count;
 
-        // TODO: to be continued...
-        // use cross_produce to count viable solutions
+                let sol = *sols_per_count.get(mine_count).unwrap().as_slice()
+                    .choose(&mut rand::thread_rng()).unwrap();
+                
+                for ((row, col), idx) in graph.tile_map.iter() {
+                    reconfigure_tile(*row, *col, sol[*idx as usize]);
+                }
+            }
+        }
 
-        None
+        // Clear just revealed unconstrained tiles from mines:
+        for (row, col) in unconstrained_revealed {
+            reconfigure_tile(row, col, false);
+        }
+
+        // Reconfigure unconstrained tiles:
+        assert!(self.remaining_mine_count >= replaced_mines);
+        let remaining_mines = self.remaining_mine_count - replaced_mines;
+
+        assert!(self.unconstrained_count >= remaining_mines);
+        let mut shuffled_mines = vec![true; remaining_mines as usize];
+        shuffled_mines.resize(self.unconstrained_count as usize, false);
+        shuffled_mines.shuffle(&mut rand::thread_rng());
+
+        for (i, row) in self.grid.iter().enumerate() {
+            for (k, cell) in row.iter().enumerate() {
+                if let CellState::UnknownUnconstrained = cell {
+                    reconfigure_tile(i as u8, k as u8, shuffled_mines.pop().unwrap());
+                }
+            }
+        }
+        assert!(shuffled_mines.len() == 0);
+
+        true
     }
 
     pub fn print(&self) {

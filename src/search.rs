@@ -58,7 +58,7 @@ pub fn find_solutions(topology: &Topology) -> VecDeque::<bv::BitVec>
         }
     }
 
-    println!("Tests count: {}", test_count);
+    //println!("Tests count: {}", test_count);
 
     solutions
 }

@@ -1,4 +1,5 @@
 use rand::{thread_rng, seq};
+use std::time::Instant;
 use super::neighbor_iter::NeighborIterable;
 use super::solver::PartialSolution;
 
@@ -51,7 +52,7 @@ impl Minefield {
         seq::SliceRandom::shuffle(&mut flattened[..], &mut thread_rng());
 
         let sol = PartialSolution::new(width, height, mine_count);
-        sol.print();
+        //sol.print();
 
         Minefield {
             grid: flattened.chunks(swidth).map(|x| x.to_vec()).collect(),
@@ -65,9 +66,12 @@ impl Minefield {
         let cells = self.find_revealed_cells(row, col, true);
         let was_something_revealed = cells.len() > 0;
 
-        let had_mine = cells.iter().any(|&(_,_,mine)| mine);
-        let survived = !had_mine || self.try_reacomodate(cells.iter()
-            .map(|&(row, col, _)| (row, col)));
+        let survived = {
+            let had_mine = cells.iter().any(|&(_,_,mine)| mine);
+
+            !had_mine || self.try_reacomodate(cells.iter()
+                .map(|&(row, col, _)| (row, col)))
+        };
 
         // Independently of surviving, reveal what is revealable:
         for (row, col, _) in cells {
@@ -81,7 +85,7 @@ impl Minefield {
             let delta = std::time::Instant::now() - begin;
             println!("Search time: {:0.09}", delta.as_secs_f64());
 
-            self.sol.print();
+            //self.sol.print();
         }
 
         survived
@@ -153,8 +157,28 @@ impl Minefield {
 
     fn try_reacomodate(&mut self, revealed: impl IntoIterator<Item = (u8, u8)>) -> bool
     {
-        let new_organization = self.sol.find_acomodating_solution(revealed);
-        // TODO: change the minefield with the new_organization
+        let begin = Instant::now();
+
+        let grid = &mut self.grid;
+        
+        let ret = self.sol.find_acomodating_solution(revealed, |row, col, is_mine| {
+            let tile = &mut grid[row as usize][col as usize];
+            match tile {
+                Tile::Hidden(content, _) => {
+                    *content = if is_mine {
+                        Content::Mine
+                    } else {
+                        Content::Empty
+                    };
+                },
+                _ => panic!("Can not reacomodate revealed tiles")
+            };
+        });
+
+        let elapsed = Instant::now() - begin;
+        println!("Reconfiguration time: {:0.06}", elapsed.as_secs_f64());
+
+        ret
     }
 
     fn recursive_reveal(&mut self, row: u8, col: u8)
