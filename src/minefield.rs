@@ -2,6 +2,7 @@ use rand::{thread_rng, seq};
 use std::time::Instant;
 use super::neighbor_iter::NeighborIterable;
 use super::solver::PartialSolution;
+use super::grid;
 
 #[derive(Copy, Clone)]
 pub enum UserMarking
@@ -24,13 +25,35 @@ pub enum Tile {
     Revealed(u8)
 }
 
-pub struct Minefield {
-    pub grid: Vec<Vec<Tile>>,
-    pub width: u8,
-    pub height: u8,
-    pub mine_count: u16,
+#[derive(Default)]
+pub struct MinefieldCounters {
     pub flag_count: u16,
     pub revealed_count: u16,
+}
+
+impl grid::GridCounters<Tile> for MinefieldCounters {
+    fn notify_change(&mut self, from: &Tile, to: &Tile)
+    {
+        if let Tile::Hidden(_, UserMarking::Flag) = *from {
+            self.flag_count -= 1;
+        }
+
+        match *to {
+            Tile::Hidden(_, UserMarking::Flag) => {
+                self.flag_count += 1;
+            },
+            Tile::Revealed(_) => {
+                assert!(!matches!(*from, Tile::Revealed(_)));
+                self.revealed_count += 1;
+            },
+            _ => ()
+        }
+    }
+}
+
+pub struct Minefield {
+    pub grid: grid::Grid<Tile, u8, MinefieldCounters>,
+    pub mine_count: u16,
     sol: PartialSolution,
 }
 
@@ -55,9 +78,7 @@ impl Minefield {
         //sol.print();
 
         Minefield {
-            grid: flattened.chunks(swidth).map(|x| x.to_vec()).collect(),
-            width, height, mine_count, flag_count: 0, revealed_count: 0,
-            sol
+            grid: grid::Grid::from_vec(width, height, flattened).unwrap(), mine_count, sol
         }
     }
 
@@ -93,43 +114,28 @@ impl Minefield {
 
     pub fn switch_mark(&mut self, row: u8, col: u8)
     {
-        if let Tile::Hidden(_, mark) = self.get_mut(row, col) {
-            let mut flag_change = 0i32;
-            *mark = match mark {
+        if let Tile::Hidden(c, mark) = *self.grid.get(row, col) {
+            self.grid.set(row, col, Tile::Hidden(c, match mark {
                 UserMarking::None => {
-                    flag_change = 1;
                     UserMarking::Flag
                 },
                 UserMarking::Flag => {
-                    flag_change = -1;
                     UserMarking::QuestionMark
                 },
                 UserMarking::QuestionMark => UserMarking::None
-            };
-
-            self.flag_count = (self.flag_count as i32 + flag_change) as u16;
+            }));
         }
     }
 
     pub fn is_all_revealed(&self) -> bool
     {
-        self.revealed_count + self.mine_count == self.width as u16 * self.height as u16
-    }
-
-    fn get_mut(&mut self, row: u8, col: u8) -> &mut Tile
-    {
-        &mut self.grid[usize::from(row)][usize::from(col)]
-    }
-
-    fn get(&self, row: u8, col: u8) -> &Tile
-    {
-        &self.grid[usize::from(row)][usize::from(col)]
+        self.grid.counters.revealed_count + self.mine_count == self.width() as u16 * self.height() as u16
     }
 
     fn find_revealed_cells(&self, row: u8, col: u8, process_revealed: bool)
         -> Vec<(u8, u8, bool)>
     {
-        match self.get(row, col) {
+        match self.grid.get(row, col) {
             Tile::Hidden(_, UserMarking::Flag) => Vec::new(),
             Tile::Hidden(Content::Mine, _) => vec![(row, col, true)],
             Tile::Hidden(Content::Empty, _) => vec![(row, col, false)],
@@ -137,7 +143,7 @@ impl Minefield {
                 // Only reveal neighbors if there is the exact number
                 // of flags around the clue
                 if process_revealed && *count == self.neighbors_of(row, col).fold(0,
-                    |sum, (row, col)| sum + match self.get(row, col) {
+                    |sum, (row, col)| sum + match self.grid.get(row, col) {
                         Tile::Hidden(_, UserMarking::Flag) => 1,
                         _ => 0
                     }
@@ -162,16 +168,16 @@ impl Minefield {
         let grid = &mut self.grid;
         
         let ret = self.sol.find_acomodating_solution(revealed, |row, col, is_mine| {
-            let tile = &mut grid[row as usize][col as usize];
-            match tile {
-                Tile::Hidden(content, _) => {
-                    *content = if is_mine {
-                        Content::Mine
-                    } else {
-                        Content::Empty
-                    };
+            match *grid.get(row, col) {
+                Tile::Hidden(_, m) => {
+                    grid.set(row, col, Tile::Hidden(if is_mine {
+                            Content::Mine
+                        } else {
+                            Content::Empty
+                        },
+                    m));
                 },
-                _ => panic!("Can not reacomodate revealed tiles")
+                _ => panic!("Can not reaccommodate revealed tiles")
             };
         });
 
@@ -183,14 +189,13 @@ impl Minefield {
 
     fn recursive_reveal(&mut self, row: u8, col: u8)
     {
-        match *self.get(row, col) {
+        match *self.grid.get(row, col) {
             Tile::Hidden(Content::Empty, _) => {
                 let bomb_count = self.count_neighbor_bombs(row, col);
 
-                (*self.get_mut(row, col)) = Tile::Revealed(bomb_count);
+                self.grid.set(row, col, Tile::Revealed(bomb_count));
                 self.sol.add_clue((row, col), bomb_count);
 
-                self.revealed_count += 1;
                 if bomb_count == 0 {
                     for (row, col) in self.neighbors_of(row, col) {
                         self.recursive_reveal(row, col);
@@ -205,7 +210,7 @@ impl Minefield {
     fn count_neighbor_bombs(&self, row: u8, col: u8) -> u8
     {
         self.neighbors_of(row, col).fold(0, |accum, (row, col)| {
-            accum + match self.get(row, col) {
+            accum + match self.grid.get(row, col) {
                 Tile::Hidden(Content::Mine, _) => 1,
                 _ => 0
             }
@@ -216,11 +221,11 @@ impl Minefield {
 impl NeighborIterable for Minefield {
     fn width(&self) -> u8
     {
-        self.width
+        self.grid.width()
     }
 
     fn height(&self) -> u8
     {
-        self.height
+        self.grid.height()
     }
 }

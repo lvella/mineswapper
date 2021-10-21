@@ -1,3 +1,4 @@
+mod grid;
 mod minefield;
 mod neighbor_iter;
 mod search;
@@ -186,7 +187,7 @@ impl RunningView {
             .width(iced::Length::Fill)
             .push(iced::Row::new()
                 .push(Svg::new(FLAG.with(|f| f.clone())).height(iced::Length::Units(25)))
-                .push(iced::Text::new(format!(": {}/{}", minefield.flag_count, minefield.mine_count))))
+                .push(iced::Text::new(format!(": {}/{}", minefield.grid.counters.flag_count, minefield.mine_count))))
             .push(iced::Text::new(
                 format!("Ellapsed time: {} seconds", delta.as_secs())));
 
@@ -225,7 +226,7 @@ impl EndGameView {
             .width(iced::Length::Fill)
             .push(iced::Row::new()
                 .push(Svg::new(FLAG.with(|f| f.clone())).height(iced::Length::Units(25)))
-                .push(iced::Text::new(format!(": {}/{}", minefield.flag_count, minefield.mine_count))))
+                .push(iced::Text::new(format!(": {}/{}", minefield.grid.counters.flag_count, minefield.mine_count))))
             .push(iced::Text::new(
                 format!("Game time: {:0.06} seconds", self.game_duration.as_secs_f64())))
             .push(iced::Text::new(
@@ -396,7 +397,7 @@ impl Application for Minesweeper {
                 }
             },
             Message::Restart => {
-                *self = Self::new(Settings::new(self.minefield.width, self.minefield.height, self.minefield.mine_count));
+                *self = Self::new(Settings::new(self.minefield.grid.width(), self.minefield.grid.height(), self.minefield.mine_count));
             }
             Message::Reveal(row, col) => {
                 if let GameState::BeforeStarted(_) = self.state {
@@ -432,7 +433,7 @@ impl Application for Minesweeper {
     fn view(&mut self) -> Element<Self::Message> {
         // Minefield
         let mut mf = Column::new();
-        for (row, states, tiles) in izip!(0u16.., self.button_grid.iter_mut(), self.minefield.grid.iter()) {
+        for (row, states, tiles) in izip!(0u16.., self.button_grid.iter_mut(), self.minefield.grid.rows()) {
             let mut view_row = Row::new();
             for (col, state, tile) in izip!(0u16.., states.iter_mut(), tiles.iter()) {
                 view_row = view_row.push(RightClickable::new(create_button(state, tile, matches!(self.state, GameState::Finished(_)))

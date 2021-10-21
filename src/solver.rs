@@ -413,7 +413,7 @@ impl PartialSolution {
             CartesianProduct::new(
                 mine_counts.iter().map(|x| x.keys().copied())
             ).filter(|comb| {
-                let total = comb.iter().map(|v| *v).sum();
+                let total = comb.iter().copied().sum();
 
                 // Do we have enough remaining mines to satisfy this
                 // combination of solutions?
