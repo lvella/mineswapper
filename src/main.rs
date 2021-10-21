@@ -1,7 +1,7 @@
 mod minefield;
 mod neighbor_iter;
-mod solver;
 mod search;
+mod solver;
 mod right_clickable;
 
 use minefield::Minefield;
@@ -312,8 +312,20 @@ fn number_color(clue: u8) -> iced_native::Color
     }
 }
 
-fn create_button<'a>(state: &'a mut button::State, tile: &minefield::Tile) -> Button<'a, Message>
+fn create_button<'a>(state: &'a mut button::State, tile: &minefield::Tile, exposed: bool) -> Button<'a, Message>
 {
+    if exposed {
+        match tile {
+            minefield::Tile::Hidden(minefield::Content::Mine, minefield::UserMarking::None) => {
+                return Button::new(state, Text::new("O").horizontal_alignment(iced::HorizontalAlignment::Center));
+            },
+            minefield::Tile::Hidden(minefield::Content::Empty, minefield::UserMarking::Flag) => {
+                return Button::new(state, Text::new("X").horizontal_alignment(iced::HorizontalAlignment::Center));
+            },
+            _ => ()
+        }
+    }
+
     match tile {
         minefield::Tile::Hidden(_, minefield::UserMarking::None) =>
             Button::new(state, Space::new(iced::Length::Fill, iced::Length::Fill)),
@@ -423,7 +435,7 @@ impl Application for Minesweeper {
         for (row, states, tiles) in izip!(0u16.., self.button_grid.iter_mut(), self.minefield.grid.iter()) {
             let mut view_row = Row::new();
             for (col, state, tile) in izip!(0u16.., states.iter_mut(), tiles.iter()) {
-                view_row = view_row.push(RightClickable::new(create_button(state, tile)
+                view_row = view_row.push(RightClickable::new(create_button(state, tile, matches!(self.state, GameState::Finished(_)))
                     .width(iced::Length::Units(30))
                     .height(iced::Length::Units(30))
                     .on_press(Message::Reveal(row as u8, col as u8)))
