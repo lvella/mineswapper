@@ -19,16 +19,14 @@ impl<'a, T, I: Into<usize> + Copy, C> Iterator for RowsIter<'a, T, I, C> {
 
     fn next(&mut self) -> Option<Self::Item>
     {
-        let next = self.idx + self.grid.w.into();
-        let ret = if next >= self.grid.data.len() {
-            None
-        } else {
-            Some(&self.grid.data[self.idx..next])
-        };
+        if self.idx >= self.grid.data.len() {
+            return None;
+        }
 
-        self.idx = next;
+        let prev = self.idx;
+        self.idx += self.grid.w.into();
 
-        ret
+        Some(&self.grid.data[prev..self.idx])
     }
 
     fn size_hint(&self) -> (usize, Option<usize>)

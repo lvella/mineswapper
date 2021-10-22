@@ -1,5 +1,5 @@
-use rand::{thread_rng, seq};
 use std::time::Instant;
+use rand::seq;
 use super::neighbor_iter::NeighborIterable;
 use super::solver::PartialSolution;
 use super::grid;
@@ -58,7 +58,8 @@ pub struct Minefield {
 }
 
 impl Minefield {
-    pub fn create_random(width: u8, height: u8, mine_count: u16) -> Minefield {
+    pub fn create_random(width: u8, height: u8, mine_count: u16, rng: &mut impl rand::Rng) -> Minefield {
+
         let swidth = usize::from(width);
         let total_size = swidth * usize::from(height);
         let smine_count = usize::from(mine_count);
@@ -72,7 +73,7 @@ impl Minefield {
         ];
         flattened.resize(total_size, Tile::Hidden(Content::Empty, UserMarking::None));
 
-        seq::SliceRandom::shuffle(&mut flattened[..], &mut thread_rng());
+        seq::SliceRandom::shuffle(&mut flattened[..], rng);
 
         let sol = PartialSolution::new(width, height, mine_count);
         //sol.print();
@@ -82,7 +83,7 @@ impl Minefield {
         }
     }
 
-    pub fn reveal(&mut self, row: u8, col: u8) -> bool
+    pub fn reveal(&mut self, rng: &mut impl rand::Rng, row: u8, col: u8) -> bool
     {
         let cells = self.find_revealed_cells(row, col, true);
         let was_something_revealed = cells.len() > 0;
@@ -90,7 +91,7 @@ impl Minefield {
         let survived = {
             let had_mine = cells.iter().any(|&(_,_,mine)| mine);
 
-            !had_mine || self.try_reacomodate(cells.iter()
+            !had_mine || self.try_reacomodate(rng, cells.iter()
                 .map(|&(row, col, _)| (row, col)))
         };
 
@@ -161,13 +162,14 @@ impl Minefield {
         }
     }
 
-    fn try_reacomodate(&mut self, revealed: impl IntoIterator<Item = (u8, u8)>) -> bool
+    fn try_reacomodate(&mut self, rng: &mut impl rand::Rng, revealed: impl IntoIterator<Item = (u8, u8)>)
+        -> bool
     {
         let begin = Instant::now();
 
         let grid = &mut self.grid;
-        
-        let ret = self.sol.find_acomodating_solution(revealed, |row, col, is_mine| {
+
+        let ret = self.sol.find_acomodating_solution(rng, revealed, |row, col, is_mine| {
             match *grid.get(row, col) {
                 Tile::Hidden(_, m) => {
                     grid.set(row, col, Tile::Hidden(if is_mine {

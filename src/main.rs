@@ -344,18 +344,41 @@ fn create_button<'a>(state: &'a mut button::State, tile: &minefield::Tile, expos
 struct Minesweeper {
     minefield: Minefield,
     button_grid: Vec<Vec<button::State>>,
+    rng: rand_xoshiro::Xoshiro256StarStar,
     state: GameState
 }
 
 impl Minesweeper {
     fn new(settings: Settings) -> Self
     {
+        use hex::FromHex;
+        use std::env;
+        use rand_core::SeedableRng;
+
+        let rng_seed = if let Some(Ok(seed)) = env::args_os().nth(1)
+            .and_then(|arg| arg.to_str()
+                .map(|valid_str| <[u8; 32]>::from_hex(valid_str))
+        ) {
+            println!("Using provided seed.");
+
+            seed
+        } else {
+            let mut seed: [u8; 32] = Default::default();
+            getrandom::getrandom(&mut seed).unwrap();
+            println!("Using random seed: {}", hex::encode(seed));
+
+            seed
+        };
+
+        let mut rng = rand_xoshiro::Xoshiro256StarStar::from_seed(rng_seed);
+
         let size = usize::from(settings.width) * usize::from(settings.height);
         Self {
-            minefield: Minefield::create_random(settings.width, settings.height, settings.mine_count),
+            minefield:
+                Minefield::create_random(settings.width, settings.height, settings.mine_count, &mut rng),
             button_grid: vec![button::State::new(); size]
                 .chunks(usize::from(settings.width)).map(|x| x.to_vec()).collect(),
-            state: GameState::BeforeStarted(settings)
+            rng, state: GameState::BeforeStarted(settings)
         }
     }
 }
@@ -405,7 +428,7 @@ impl Application for Minesweeper {
                 }
 
                 if let GameState::Running(running) = self.state {
-                    let has_lost = !self.minefield.reveal(row, col);
+                    let has_lost = !self.minefield.reveal(&mut self.rng, row, col);
                     let has_won = !has_lost && self.minefield.is_all_revealed();
 
                     if has_lost || has_won {

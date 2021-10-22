@@ -355,8 +355,9 @@ impl PartialSolution {
     /// this partial solution should no longer be used.
     pub fn find_acomodating_solution(
         &mut self,
+        rng: &mut impl rand::Rng,
         revealed: impl IntoIterator<Item = (u8, u8)>,
-        mut reconfigure_tile: impl FnMut(u8, u8, bool)
+        mut reconfigure_tile: impl FnMut(u8, u8, bool),
     ) -> bool
     {
         let mut unconstrained_revealed = Vec::new();
@@ -425,19 +426,19 @@ impl PartialSolution {
                 // the mines left over from this solution?
                 if self.unconstrained_count < self.remaining_mine_count - total {
                     return false;
-                } 
+                }
 
                 true
             })
         );
 
         // TODO: calculate the probability of each combination actually happening,
-        // so that we have the weights to randomly select one solution. 
+        // so that we have the weights to randomly select one solution.
         // For now, just sample uniformly from the combinations, and then sample
         // uniformly from graph solutions that makes up the combination:
         use rand::seq::SliceRandom;
         let mut replaced_mines = 0u16;
-        if let Some(combination) = combinations.as_slice().choose(&mut rand::thread_rng()) {
+        if let Some(combination) = combinations.as_slice().choose(rng) {
             // Reconfigure constrained tiles
             for (mine_count, sols_per_count, graph) in
                 izip!(combination, &mine_counts, &self.graphs_solutions)
@@ -445,8 +446,8 @@ impl PartialSolution {
                 replaced_mines += mine_count;
 
                 let sol = *sols_per_count.get(mine_count).unwrap().as_slice()
-                    .choose(&mut rand::thread_rng()).unwrap();
-                
+                    .choose(rng).unwrap();
+
                 for ((row, col), idx) in graph.tile_map.iter() {
                     reconfigure_tile(*row, *col, sol[*idx as usize]);
                 }
@@ -465,7 +466,7 @@ impl PartialSolution {
         assert!(self.unconstrained_count >= remaining_mines);
         let mut shuffled_mines = vec![true; remaining_mines as usize];
         shuffled_mines.resize(self.unconstrained_count as usize, false);
-        shuffled_mines.shuffle(&mut rand::thread_rng());
+        shuffled_mines.shuffle(rng);
 
         for (i, row) in self.grid.iter().enumerate() {
             for (k, cell) in row.iter().enumerate() {
