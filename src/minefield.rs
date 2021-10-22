@@ -79,7 +79,8 @@ impl Minefield {
         //sol.print();
 
         Minefield {
-            grid: grid::Grid::from_vec(width, height, flattened).unwrap(), mine_count, sol
+            grid: grid::Grid::from_vec(width, height, Default::default(), flattened).unwrap(),
+            mine_count, sol
         }
     }
 

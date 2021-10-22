@@ -6,6 +6,7 @@ use itertools::izip;
 use rand;
 use super::neighbor_iter::NeighborIterable;
 use super::search;
+use super::grid;
 
 type Key = (u8, u8);
 
@@ -23,13 +24,37 @@ struct GraphSolution {
     alternatives: VecDeque::<bv::BitVec>
 }
 
+struct Counters {
+    unconstrained_cells: u16,
+    hidden_mines: u16
+}
+
+impl grid::GridCounters<CellState> for Counters {
+    fn notify_change(&mut self, from: &CellState, to: &CellState)
+    {
+        match *from {
+            CellState::UnknownUnconstrained => {
+                self.unconstrained_cells -= 1;
+            },
+            CellState::Mine => {
+                // These states can never change
+                assert!(matches!(*from, CellState::Mine));
+                return;
+            }
+            _ => ()
+        }
+
+        match *to {
+            CellState::Mine => self.hidden_mines -= 1,
+            CellState::UnknownUnconstrained => panic!("Cell state can not be set to unconstrained"),
+            _ => ()
+        }
+    }
+}
+
 pub struct PartialSolution {
-    grid: Vec<Vec<CellState>>,
-    width: u8,
-    height: u8,
-    remaining_mine_count: u16,
-    unconstrained_count: u16,
-    graphs_solutions: Vec<GraphSolution>
+    grid: grid::Grid<CellState, u8, Counters>,
+    graphs_solutions: Vec<GraphSolution>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -90,16 +115,20 @@ where T: Copy
 impl PartialSolution {
     pub fn new(width: u8, height: u8, mine_count: u16) -> Self
     {
+        let counters = Counters{
+            unconstrained_cells: width as u16 * height as u16,
+            hidden_mines: mine_count
+        };
+
         Self{
-            grid: vec![vec![CellState::UnknownUnconstrained; width as usize]; height as usize],
-            unconstrained_count: width as u16 * height as u16,
-            width, height, remaining_mine_count: mine_count, graphs_solutions: Vec::new()
+            grid: grid::Grid::new(width, height, counters, CellState::UnknownUnconstrained),
+            graphs_solutions: Vec::new()
         }
     }
 
     pub fn add_clue(&mut self, (row, col): Key, mut clue: u8)
     {
-        let state = &mut self.grid[row as usize][col as usize];
+        let state = self.grid.get(row, col);
 
         // Check if we previously knew if the cell was empty,
         // and possibly update the state before anything else.
@@ -111,11 +140,6 @@ impl PartialSolution {
                 // must update the neighboring cells.
                 self.breadth_first_update(UpdateAction::ToEmpty, &[(row, col)]);
             },
-            CellState::UnknownUnconstrained => {
-                // Newly revealed cell will replace the unconstrained, so we
-                // must decrease the count.
-                self.unconstrained_count -= 1;
-            }
             _ => {}
         }
 
@@ -123,11 +147,10 @@ impl PartialSolution {
 
         // Mark neighbors as constrained and check for known mines:
         for (row, col) in self.neighbors_of(row, col) {
-            let cell = &mut self.grid[row as usize][col as usize];
-            match *cell {
+            let cell = self.grid.get(row, col);
+            match cell {
                 CellState::UnknownUnconstrained => {
-                    *cell = CellState::UnknownConstrained;
-                    self.unconstrained_count -= 1;
+                    self.grid.set(row, col, CellState::UnknownConstrained);
                     unknowns.push((row, col));
                 },
                 CellState::UnknownConstrained => {
@@ -141,7 +164,7 @@ impl PartialSolution {
         }
 
         // Set the state of the new clue cell:
-        self.grid[row as usize][col as usize] = CellState::Clue(clue);
+        self.grid.set(row, col, CellState::Clue(clue));
 
         // Update the solution, changing unknown neighbors to either Empty or Mines, as appropriate.
         if unknowns.len() > 0 {
@@ -171,7 +194,7 @@ impl PartialSolution {
 
             match action {
                 UpdateAction::CheckIfClueFindMines => {
-                    let clue = if let CellState::Clue(clue) = self.get(row, col) {
+                    let clue = if let CellState::Clue(clue) = self.grid.get(row, col) {
                         *clue
                     } else {
                         panic!("Must be a clue!");
@@ -180,7 +203,7 @@ impl PartialSolution {
                     let mut unknowns = ArrayVec::<Key, 8>::new();
 
                     for (row, col) in self.neighbors_of(row, col) {
-                        match self.get(row, col) {
+                        match self.grid.get(row, col) {
                             CellState::UnknownConstrained => unknowns.push((row, col)),
                             CellState::UnknownUnconstrained =>
                                 panic!("Can't have unconstrained next to a clue!"),
@@ -191,7 +214,7 @@ impl PartialSolution {
                     assert!(unknowns.len() as u8 >= clue);
 
                     if unknowns.len() as u8 == clue {
-                        *self.get_mut(row, col) = CellState::Clue(0);
+                        self.grid.set(row, col, CellState::Clue(0));
 
                         for (row, col) in unknowns {
                             try_enqueue((row, col), UpdateAction::ToMine);
@@ -200,20 +223,20 @@ impl PartialSolution {
                 },
 
                 UpdateAction::ToMine => {
-                    assert!(matches!(self.get(row, col), CellState::UnknownConstrained));
-                    *self.get_mut(row, col) = CellState::Mine;
-                    self.remaining_mine_count -= 1;
+                    assert!(matches!(self.grid.get(row, col), CellState::UnknownConstrained));
+                    self.grid.set(row, col, CellState::Mine);
 
                     for (row, col) in self.neighbors_of(row, col) {
-                        match self.get_mut(row, col) {
-                            CellState::Clue(val) if *val > 0 => {
-                                *val -= 1;
-                                if *val == 0 {
+                        match *self.grid.get(row, col) {
+                            CellState::Clue(mut val) if val > 0 => {
+                                val -= 1;
+                                if val == 0 {
                                     // A clue can only get to zero once,
                                     // so it can not be inserted twice:
                                     assert!(is_queued.insert((row, col)));
                                     queue.push_back(((row, col), UpdateAction::CheckIfClueFindEmpties));
                                 }
+                                self.grid.set(row, col, CellState::Clue(val));
                             },
                             _ => ()
                         }
@@ -222,10 +245,10 @@ impl PartialSolution {
 
                 UpdateAction::CheckIfClueFindEmpties => {
                     // You can only get empties from a 0 clue:
-                    assert!(matches!(self.get(row, col), CellState::Clue(0)));
+                    assert!(matches!(self.grid.get(row, col), CellState::Clue(0)));
 
                     for (row, col) in self.neighbors_of(row, col) {
-                        match self.get(row, col) {
+                        match self.grid.get(row, col) {
                             CellState::UnknownConstrained =>
                                 try_enqueue((row, col), UpdateAction::ToEmpty),
                             CellState::UnknownUnconstrained =>
@@ -237,12 +260,12 @@ impl PartialSolution {
 
                 UpdateAction::ToEmpty => {
                     // Only constrained can be found to be empty:
-                    assert!(matches!(self.get(row, col), CellState::UnknownConstrained));
-                    *self.get_mut(row, col) = CellState::Empty;
+                    assert!(matches!(self.grid.get(row, col), CellState::UnknownConstrained));
+                    self.grid.set(row, col, CellState::Empty);
 
                     for (row, col) in self.neighbors_of(row, col) {
-                        match self.get(row, col) {
-                            CellState::Clue(val) if *val > 0 => {
+                        match *self.grid.get(row, col) {
+                            CellState::Clue(val) if val > 0 => {
                                 try_enqueue((row, col), UpdateAction::CheckIfClueFindMines)
                             },
                             _ => ()
@@ -255,10 +278,10 @@ impl PartialSolution {
 
     pub fn find_graph_solutions(&mut self)
     {
-        let mut visited = vec![bv::bitvec![0; self.width as usize]; self.height as usize];
+        let mut visited = vec![bv::bitvec![0; self.grid.width() as usize]; self.grid.height() as usize];
 
         let mut graphs_solutions = Vec::new();
-        for (i, row) in self.grid.iter().enumerate() {
+        for (i, row) in self.grid.rows().enumerate() {
             for (j, cell) in row.iter().enumerate() {
                 let cell_visited = visited[i].get_mut(j).unwrap();
                 if *cell_visited {
@@ -305,13 +328,13 @@ impl PartialSolution {
                 }
             };
 
-            match self.get(row, col) {
+            match self.grid.get(row, col) {
                 CellState::Clue(val) => {
                     assert!(*val > 0u8);
 
                     let mut adjacency = Vec::new();
                     for (row, col) in self.neighbors_of(row, col) {
-                        if let CellState::UnknownConstrained = self.get(row, col) {
+                        if let CellState::UnknownConstrained = self.grid.get(row, col) {
                             let len = unk_map.len() as u16;
                             let unk_id = *unk_map.entry((row, col)).or_insert(len);
                             adjacency.push(unk_id);
@@ -324,7 +347,7 @@ impl PartialSolution {
                 },
                 CellState::UnknownConstrained => {
                     for (row, col) in self.neighbors_of(row, col) {
-                        if let CellState::Clue(val) = self.get(row, col) {
+                        if let CellState::Clue(val) = self.grid.get(row, col) {
                             if *val > 0u8 {
                                 try_enqueue(row, col);
                             }
@@ -337,16 +360,6 @@ impl PartialSolution {
 
         let unknown_count = unk_map.len() as u16;
         (unk_map, search::Topology{unknown_count, clues})
-    }
-
-    fn get_mut(&mut self, row: u8, col: u8) -> &mut CellState
-    {
-        &mut self.grid[usize::from(row)][usize::from(col)]
-    }
-
-    fn get(&self, row: u8, col: u8) -> &CellState
-    {
-        &self.grid[usize::from(row)][usize::from(col)]
     }
 
     /// Tries to find a valid configuration where all cells in "reveal" are empty.
@@ -363,7 +376,7 @@ impl PartialSolution {
         let mut unconstrained_revealed = Vec::new();
 
         for key in revealed {
-            let cell = self.get_mut(key.0, key.1);
+            let cell = *self.grid.get(key.0, key.1);
             match cell {
                 CellState::UnknownConstrained => {
                     // Linear search through all the graphs (because there can't be many)
@@ -383,10 +396,8 @@ impl PartialSolution {
                     }
                 },
                 CellState::UnknownUnconstrained => {
-                    // Each unconstrained cell revealed
-                    // reduces 1 possible mine location
                     unconstrained_revealed.push(key);
-                    *cell = CellState::Empty;
+                    self.grid.set(key.0, key.1, CellState::Empty);
                 },
                 CellState::Mine => {
                     return false;
@@ -395,8 +406,6 @@ impl PartialSolution {
                 CellState::Empty => ()
             }
         }
-
-        self.unconstrained_count -= unconstrained_revealed.len() as u16;
 
         // Count the number of mines in each solution for each graph:
         let mine_counts: Vec<HashMap<u16, Vec<&bv::BitVec>>> =
@@ -418,13 +427,13 @@ impl PartialSolution {
 
                 // Do we have enough remaining mines to satisfy this
                 // combination of solutions?
-                if self.remaining_mine_count < total {
+                if self.grid.counters.hidden_mines < total {
                     return false;
                 }
 
                 // Do we have enough unconstrained squares to fit all
                 // the mines left over from this solution?
-                if self.unconstrained_count < self.remaining_mine_count - total {
+                if self.grid.counters.unconstrained_cells < self.grid.counters.hidden_mines - total {
                     return false;
                 }
 
@@ -460,15 +469,15 @@ impl PartialSolution {
         }
 
         // Reconfigure unconstrained tiles:
-        assert!(self.remaining_mine_count >= replaced_mines);
-        let remaining_mines = self.remaining_mine_count - replaced_mines;
+        assert!(self.grid.counters.hidden_mines >= replaced_mines);
+        let remaining_mines = self.grid.counters.hidden_mines - replaced_mines;
 
-        assert!(self.unconstrained_count >= remaining_mines);
+        assert!(self.grid.counters.unconstrained_cells >= remaining_mines);
         let mut shuffled_mines = vec![true; remaining_mines as usize];
-        shuffled_mines.resize(self.unconstrained_count as usize, false);
+        shuffled_mines.resize(self.grid.counters.unconstrained_cells as usize, false);
         shuffled_mines.shuffle(rng);
 
-        for (i, row) in self.grid.iter().enumerate() {
+        for (i, row) in self.grid.rows().enumerate() {
             for (k, cell) in row.iter().enumerate() {
                 if let CellState::UnknownUnconstrained = cell {
                     reconfigure_tile(i as u8, k as u8, shuffled_mines.pop().unwrap());
@@ -490,7 +499,7 @@ impl PartialSolution {
         }
 
         print!("\n");
-        for (i, row) in self.grid.iter().enumerate() {
+        for (i, row) in self.grid.rows().enumerate() {
             for (j, cell) in row.iter().enumerate() {
                 if let CellState::UnknownConstrained = cell {
                     print!("\u{20dd}{}", map.get(&(i as u8, j as u8)).unwrap());
@@ -531,10 +540,10 @@ impl std::fmt::Display for CellState {
 impl NeighborIterable for PartialSolution {
     fn width(&self) -> u8
     {
-        self.width
+        self.grid.width()
     }
     fn height(&self) -> u8
     {
-        self.height
+        self.grid.height()
     }
 }
