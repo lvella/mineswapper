@@ -12,7 +12,11 @@ use itertools::izip;
 use right_clickable::RightClickable;
 use strum_macros;
 
-thread_local!(static FLAG: iced::svg::Handle = iced::svg::Handle::from_path("resources/flag.svg"));
+thread_local!(static FLAG: iced::svg::Handle =
+    iced::svg::Handle::from_memory(include_bytes!("../resources/flag.svg.gz").to_vec()));
+
+thread_local!(static CROSSED_FLAG: iced::svg::Handle =
+    iced::svg::Handle::from_memory(include_bytes!("../resources/crossed_flag.svg.gz").to_vec()));
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, strum_macros::EnumIter)]
 enum DifficultyLevels {
@@ -321,7 +325,7 @@ fn create_button<'a>(state: &'a mut button::State, tile: &minefield::Tile, expos
                 return Button::new(state, Text::new("O").horizontal_alignment(iced::HorizontalAlignment::Center));
             },
             minefield::Tile::Hidden(minefield::Content::Empty, minefield::UserMarking::Flag) => {
-                return Button::new(state, Text::new("X").horizontal_alignment(iced::HorizontalAlignment::Center));
+                return Button::new(state, Svg::new(CROSSED_FLAG.with(|f| f.clone())));
             },
             _ => ()
         }
@@ -491,5 +495,6 @@ impl Application for Minesweeper {
 }
 
 fn main() -> iced::Result {
-    Minesweeper::run(iced::Settings::default())
+    let settings = iced::Settings{..Default::default()};
+    Minesweeper::run(settings)
 }
