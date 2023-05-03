@@ -3,16 +3,15 @@ use std::collections::VecDeque;
 
 pub struct Clue {
     pub mine_count: u8,
-    pub adjacency: Vec<u16>
+    pub adjacency: Vec<u16>,
 }
 
 pub struct Topology {
     pub unknown_count: u16,
-    pub clues: Vec<Clue>
+    pub clues: Vec<Clue>,
 }
 
-pub fn find_solutions(topology: &Topology) -> VecDeque::<bv::BitVec>
-{
+pub fn find_solutions(topology: &Topology) -> VecDeque<bv::BitVec> {
     // Create a reverse map of unknows to the clues:
     let unknowns_to_clues = {
         let mut unknowns_to_clues = vec![Vec::<u16>::new(); topology.unknown_count as usize];
@@ -29,7 +28,6 @@ pub fn find_solutions(topology: &Topology) -> VecDeque::<bv::BitVec>
     let mut solutions = VecDeque::<bv::BitVec>::new();
     solutions.push_back(bv::BitVec::new());
 
-    let mut test_count = 0;
     loop {
         if let Some(mut sol) = solutions.pop_front() {
             if sol.len() >= topology.unknown_count as usize {
@@ -50,8 +48,6 @@ pub fn find_solutions(topology: &Topology) -> VecDeque::<bv::BitVec>
             if is_last_possible(&topology, to_clues, &sol) {
                 solutions.push_back(sol);
             }
-
-            test_count += 2;
         } else {
             // Since the list is empty, solution is impossible.
             break;
@@ -63,8 +59,7 @@ pub fn find_solutions(topology: &Topology) -> VecDeque::<bv::BitVec>
     solutions
 }
 
-fn is_last_possible(topology: &Topology, to_clues: &[u16], sol: &bv::BitVec) -> bool
-{
+fn is_last_possible(topology: &Topology, to_clues: &[u16], sol: &bv::BitVec) -> bool {
     for clue_idx in to_clues {
         let mut mine_count = 0;
         let mut unknown_count = 0;

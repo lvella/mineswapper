@@ -1,12 +1,12 @@
-use std::collections::{VecDeque, HashSet, HashMap};
-use std::iter::FromIterator;
+use super::grid;
+use super::neighbor_iter::NeighborIterable;
+use super::search;
 use arrayvec::ArrayVec;
 use bitvec::prelude as bv;
 use itertools::izip;
 use rand;
-use super::neighbor_iter::NeighborIterable;
-use super::search;
-use super::grid;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::iter::FromIterator;
 
 type Key = (u8, u8);
 
@@ -21,33 +21,32 @@ enum CellState {
 
 struct GraphSolution {
     tile_map: HashMap<Key, u16>,
-    alternatives: VecDeque::<bv::BitVec>
+    alternatives: VecDeque<bv::BitVec>,
 }
 
 struct Counters {
     unconstrained_cells: u16,
-    hidden_mines: u16
+    hidden_mines: u16,
 }
 
 impl grid::GridCounters<CellState> for Counters {
-    fn notify_change(&mut self, from: &CellState, to: &CellState)
-    {
+    fn notify_change(&mut self, from: &CellState, to: &CellState) {
         match *from {
             CellState::UnknownUnconstrained => {
                 self.unconstrained_cells -= 1;
-            },
+            }
             CellState::Mine => {
                 // These states can never change
                 assert!(matches!(*from, CellState::Mine));
                 return;
             }
-            _ => ()
+            _ => (),
         }
 
         match *to {
             CellState::Mine => self.hidden_mines -= 1,
             CellState::UnknownUnconstrained => panic!("Cell state can not be set to unconstrained"),
-            _ => ()
+            _ => (),
         }
     }
 }
@@ -62,46 +61,48 @@ enum UpdateAction {
     CheckIfClueFindMines,
     ToMine,
     CheckIfClueFindEmpties,
-    ToEmpty
+    ToEmpty,
 }
 
-struct CartesianProduct<T>
-{
+struct CartesianProduct<T> {
     curr: Vec<usize>,
-    basis: Vec<Vec<T>>
+    basis: Vec<Vec<T>>,
 }
 
-impl<T> CartesianProduct<T>
-{
-    fn new(basis: impl IntoIterator<Item = impl IntoIterator<Item = T>>) -> Self
-    {
-        let basis: Vec<Vec<T>> =
-            basis.into_iter().map(|v| v.into_iter().collect()).collect();
+impl<T> CartesianProduct<T> {
+    fn new(basis: impl IntoIterator<Item = impl IntoIterator<Item = T>>) -> Self {
+        let basis: Vec<Vec<T>> = basis.into_iter().map(|v| v.into_iter().collect()).collect();
         Self {
             curr: vec![0; basis.len()],
-            basis
+            basis,
         }
     }
 }
 
 impl<T> Iterator for CartesianProduct<T>
-where T: Copy
+where
+    T: Copy,
 {
     type Item = Vec<T>;
 
-    fn next(&mut self) -> Option<Self::Item>
-    {
+    fn next(&mut self) -> Option<Self::Item> {
         if self.curr.len() == 0 {
             return None;
         }
-        let ret = Some(self.curr.iter().enumerate().map(|(i, val)| self.basis[i][*val]).collect());
+        let ret = Some(
+            self.curr
+                .iter()
+                .enumerate()
+                .map(|(i, val)| self.basis[i][*val])
+                .collect(),
+        );
 
         for (val, v) in izip!(self.curr.iter_mut(), self.basis.iter()) {
             *val += 1;
             if *val != v.len() {
                 return ret;
             }
-            
+
             *val = 0;
         }
 
@@ -113,21 +114,19 @@ where T: Copy
 }
 
 impl PartialSolution {
-    pub fn new(width: u8, height: u8, mine_count: u16) -> Self
-    {
-        let counters = Counters{
+    pub fn new(width: u8, height: u8, mine_count: u16) -> Self {
+        let counters = Counters {
             unconstrained_cells: width as u16 * height as u16,
-            hidden_mines: mine_count
+            hidden_mines: mine_count,
         };
 
-        Self{
+        Self {
             grid: grid::Grid::new(width, height, counters, CellState::UnknownUnconstrained),
-            graphs_solutions: Vec::new()
+            graphs_solutions: Vec::new(),
         }
     }
 
-    pub fn add_clue(&mut self, (row, col): Key, mut clue: u8)
-    {
+    pub fn add_clue(&mut self, (row, col): Key, mut clue: u8) {
         let state = self.grid.get(row, col);
 
         // Check if we previously knew if the cell was empty,
@@ -139,7 +138,7 @@ impl PartialSolution {
                 // We didn't knew this was empty, so we
                 // must update the neighboring cells.
                 self.breadth_first_update(UpdateAction::ToEmpty, &[(row, col)]);
-            },
+            }
             _ => {}
         }
 
@@ -152,13 +151,13 @@ impl PartialSolution {
                 CellState::UnknownUnconstrained => {
                     self.grid.set(row, col, CellState::UnknownConstrained);
                     unknowns.push((row, col));
-                },
+                }
                 CellState::UnknownConstrained => {
                     unknowns.push((row, col));
-                },
+                }
                 CellState::Mine => {
                     clue -= 1;
-                },
+                }
                 _ => {}
             }
         }
@@ -177,11 +176,10 @@ impl PartialSolution {
         }
     }
 
-    fn breadth_first_update(&mut self, action: UpdateAction, seed: &[Key])
-    {
+    fn breadth_first_update(&mut self, action: UpdateAction, seed: &[Key]) {
         let mut is_queued: HashSet<Key> = HashSet::from_iter(seed.iter().copied());
-        let mut queue: VecDeque<(Key, UpdateAction)> = is_queued.iter()
-            .map(|key| (*key, action)).collect();
+        let mut queue: VecDeque<(Key, UpdateAction)> =
+            is_queued.iter().map(|key| (*key, action)).collect();
 
         while let Some(((row, col), action)) = queue.pop_front() {
             is_queued.remove(&(row, col));
@@ -205,9 +203,10 @@ impl PartialSolution {
                     for (row, col) in self.neighbors_of(row, col) {
                         match self.grid.get(row, col) {
                             CellState::UnknownConstrained => unknowns.push((row, col)),
-                            CellState::UnknownUnconstrained =>
-                                panic!("Can't have unconstrained next to a clue!"),
-                            _ => ()
+                            CellState::UnknownUnconstrained => {
+                                panic!("Can't have unconstrained next to a clue!")
+                            }
+                            _ => (),
                         }
                     }
 
@@ -220,10 +219,13 @@ impl PartialSolution {
                             try_enqueue((row, col), UpdateAction::ToMine);
                         }
                     }
-                },
+                }
 
                 UpdateAction::ToMine => {
-                    assert!(matches!(self.grid.get(row, col), CellState::UnknownConstrained));
+                    assert!(matches!(
+                        self.grid.get(row, col),
+                        CellState::UnknownConstrained
+                    ));
                     self.grid.set(row, col, CellState::Mine);
 
                     for (row, col) in self.neighbors_of(row, col) {
@@ -234,14 +236,17 @@ impl PartialSolution {
                                     // A clue can only get to zero once,
                                     // so it can not be inserted twice:
                                     assert!(is_queued.insert((row, col)));
-                                    queue.push_back(((row, col), UpdateAction::CheckIfClueFindEmpties));
+                                    queue.push_back((
+                                        (row, col),
+                                        UpdateAction::CheckIfClueFindEmpties,
+                                    ));
                                 }
                                 self.grid.set(row, col, CellState::Clue(val));
-                            },
-                            _ => ()
+                            }
+                            _ => (),
                         }
                     }
-                },
+                }
 
                 UpdateAction::CheckIfClueFindEmpties => {
                     // You can only get empties from a 0 clue:
@@ -249,26 +254,31 @@ impl PartialSolution {
 
                     for (row, col) in self.neighbors_of(row, col) {
                         match self.grid.get(row, col) {
-                            CellState::UnknownConstrained =>
-                                try_enqueue((row, col), UpdateAction::ToEmpty),
-                            CellState::UnknownUnconstrained =>
-                                panic!("Can't have unconstrained next to a clue!"),
-                            _ => ()
+                            CellState::UnknownConstrained => {
+                                try_enqueue((row, col), UpdateAction::ToEmpty)
+                            }
+                            CellState::UnknownUnconstrained => {
+                                panic!("Can't have unconstrained next to a clue!")
+                            }
+                            _ => (),
                         }
                     }
-                },
+                }
 
                 UpdateAction::ToEmpty => {
                     // Only constrained can be found to be empty:
-                    assert!(matches!(self.grid.get(row, col), CellState::UnknownConstrained));
+                    assert!(matches!(
+                        self.grid.get(row, col),
+                        CellState::UnknownConstrained
+                    ));
                     self.grid.set(row, col, CellState::Empty);
 
                     for (row, col) in self.neighbors_of(row, col) {
                         match *self.grid.get(row, col) {
                             CellState::Clue(val) if val > 0 => {
                                 try_enqueue((row, col), UpdateAction::CheckIfClueFindMines)
-                            },
-                            _ => ()
+                            }
+                            _ => (),
                         }
                     }
                 }
@@ -276,14 +286,14 @@ impl PartialSolution {
         }
     }
 
-    pub fn find_graph_solutions(&mut self)
-    {
-        let mut visited = vec![bv::bitvec![0; self.grid.width() as usize]; self.grid.height() as usize];
+    pub fn find_graph_solutions(&mut self) {
+        let mut visited =
+            vec![bv::bitvec![0; self.grid.width() as usize]; self.grid.height() as usize];
 
         let mut graphs_solutions = Vec::new();
         for (i, row) in self.grid.rows().enumerate() {
             for (j, cell) in row.iter().enumerate() {
-                let cell_visited = visited[i].get_mut(j).unwrap();
+                let mut cell_visited = visited[i].get_mut(j).unwrap();
                 if *cell_visited {
                     continue;
                 }
@@ -291,13 +301,17 @@ impl PartialSolution {
                 match cell {
                     CellState::Clue(val) if *val > 0 => {
                         cell_visited.set(true);
+                        drop(cell_visited);
 
                         let (tile_map, topology) =
                             self.extract_graph_starting_from(i as u8, j as u8, &mut visited[..]);
                         let alternatives = search::find_solutions(&topology);
-                        graphs_solutions.push(GraphSolution{tile_map, alternatives});
-                    },
-                    _ => ()
+                        graphs_solutions.push(GraphSolution {
+                            tile_map,
+                            alternatives,
+                        });
+                    }
+                    _ => (),
                 }
             }
         }
@@ -305,9 +319,12 @@ impl PartialSolution {
         self.graphs_solutions = graphs_solutions;
     }
 
-    fn extract_graph_starting_from(&self, row: u8, col: u8, visited: &mut [bv::BitVec]) ->
-        (HashMap::<Key, u16>, search::Topology)
-    {
+    fn extract_graph_starting_from(
+        &self,
+        row: u8,
+        col: u8,
+        visited: &mut [bv::BitVec],
+    ) -> (HashMap<Key, u16>, search::Topology) {
         // Start search
         let mut queue = VecDeque::new();
         queue.push_back((row, col));
@@ -321,7 +338,7 @@ impl PartialSolution {
         // Breadth-first search
         while let Some((row, col)) = queue.pop_front() {
             let mut try_enqueue = |row, col| {
-                let visited = visited[row as usize].get_mut(col as usize).unwrap();
+                let mut visited = visited[row as usize].get_mut(col as usize).unwrap();
                 if !*visited {
                     visited.set(true);
                     queue.push_back((row, col));
@@ -343,8 +360,11 @@ impl PartialSolution {
                         }
                     }
 
-                    clues.push(search::Clue{mine_count: *val, adjacency});
-                },
+                    clues.push(search::Clue {
+                        mine_count: *val,
+                        adjacency,
+                    });
+                }
                 CellState::UnknownConstrained => {
                     for (row, col) in self.neighbors_of(row, col) {
                         if let CellState::Clue(val) = self.grid.get(row, col) {
@@ -353,13 +373,19 @@ impl PartialSolution {
                             }
                         }
                     }
-                },
-                _ => panic!("Only constrained unknowns and clues must be part of a graph")
+                }
+                _ => panic!("Only constrained unknowns and clues must be part of a graph"),
             }
         }
 
         let unknown_count = unk_map.len() as u16;
-        (unk_map, search::Topology{unknown_count, clues})
+        (
+            unk_map,
+            search::Topology {
+                unknown_count,
+                clues,
+            },
+        )
     }
 
     /// Tries to find a valid configuration where all cells in "reveal" are empty.
@@ -371,8 +397,7 @@ impl PartialSolution {
         rng: &mut impl rand::Rng,
         revealed: impl IntoIterator<Item = (u8, u8)>,
         mut reconfigure_tile: impl FnMut(u8, u8, bool),
-    ) -> bool
-    {
+    ) -> bool {
         let mut unconstrained_revealed = Vec::new();
 
         for key in revealed {
@@ -394,35 +419,35 @@ impl PartialSolution {
                             break;
                         }
                     }
-                },
+                }
                 CellState::UnknownUnconstrained => {
                     unconstrained_revealed.push(key);
                     self.grid.set(key.0, key.1, CellState::Empty);
-                },
+                }
                 CellState::Mine => {
                     return false;
-                },
+                }
                 CellState::Clue(_) => panic!("Tried to reveal an already revealed cell."),
-                CellState::Empty => ()
+                CellState::Empty => (),
             }
         }
 
         // Count the number of mines in each solution for each graph:
-        let mine_counts: Vec<HashMap<u16, Vec<&bv::BitVec>>> =
-            self.graphs_solutions.iter().map(|sol| {
+        let mine_counts: Vec<HashMap<u16, Vec<&bv::BitVec>>> = self
+            .graphs_solutions
+            .iter()
+            .map(|sol| {
                 let mut counts: HashMap<u16, Vec<&bv::BitVec>> = HashMap::new();
-                for alt in sol.alternatives.iter()
-                {
+                for alt in sol.alternatives.iter() {
                     let count = alt.count_ones() as u16;
                     counts.entry(count).or_default().push(alt);
                 }
                 counts
-            }).collect();
+            })
+            .collect();
 
         let combinations = Vec::from_iter(
-            CartesianProduct::new(
-                mine_counts.iter().map(|x| x.keys().copied())
-            ).filter(|comb| {
+            CartesianProduct::new(mine_counts.iter().map(|x| x.keys().copied())).filter(|comb| {
                 let total = comb.iter().copied().sum();
 
                 // Do we have enough remaining mines to satisfy this
@@ -433,12 +458,13 @@ impl PartialSolution {
 
                 // Do we have enough unconstrained squares to fit all
                 // the mines left over from this solution?
-                if self.grid.counters.unconstrained_cells < self.grid.counters.hidden_mines - total {
+                if self.grid.counters.unconstrained_cells < self.grid.counters.hidden_mines - total
+                {
                     return false;
                 }
 
                 true
-            })
+            }),
         );
 
         // TODO: calculate the probability of each combination actually happening,
@@ -454,8 +480,12 @@ impl PartialSolution {
             {
                 replaced_mines += mine_count;
 
-                let sol = *sols_per_count.get(mine_count).unwrap().as_slice()
-                    .choose(rng).unwrap();
+                let sol = *sols_per_count
+                    .get(mine_count)
+                    .unwrap()
+                    .as_slice()
+                    .choose(rng)
+                    .unwrap();
 
                 for ((row, col), idx) in graph.tile_map.iter() {
                     reconfigure_tile(*row, *col, sol[*idx as usize]);
@@ -511,13 +541,13 @@ impl PartialSolution {
         }
         print!("\n");
 
-    //    for (i, gs) in self.graphs_solutions.iter().enumerate() {
-    //        println!("{}:", i);
-    //        for s in &gs.alternatives {
-    //            println!("  {}", s);
-    //        }
-    //    }
-    //    print!("\n");
+        //    for (i, gs) in self.graphs_solutions.iter().enumerate() {
+        //        println!("{}:", i);
+        //        for s in &gs.alternatives {
+        //            println!("  {}", s);
+        //        }
+        //    }
+        //    print!("\n");
     }
 }
 
@@ -531,19 +561,17 @@ impl std::fmt::Display for CellState {
                 CellState::UnknownConstrained => "C",
                 CellState::UnknownUnconstrained => "U",
                 CellState::Clue(_) => " ",
-            })
+            }),
         };
         f.write_str(val.as_str())
     }
 }
 
 impl NeighborIterable for PartialSolution {
-    fn width(&self) -> u8
-    {
+    fn width(&self) -> u8 {
         self.grid.width()
     }
-    fn height(&self) -> u8
-    {
+    fn height(&self) -> u8 {
         self.grid.height()
     }
 }

@@ -1,23 +1,23 @@
 [package]
 name = "non-deterministic-minesweeper"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Lucas Clemente Vella <lvella@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
-arrayvec = "0.7.1"
-bitvec = "0.22.3"
-delegate = "0.6.1"
-getrandom = "0.2.3"
-hex = "0.4.3"
-iced = {version = "0.3", features = ["svg", "tokio"]}
-iced_native = "0.4"
-itertools = "0.10.1"
-rand = "0.8.4"
-rand_core = "0.6.3"
-rand_xoshiro = "0.6.0"
-strum = "0.21"
-strum_macros = "0.21"
+arrayvec = "0.7"
+bitvec = "1.0"
+delegate = "0.9"
+getrandom = "0.2"
+hex = "0.4"
+iced = {version = "0.9", features = ["svg", "tokio"]}
+iced_native = "0.10"
+itertools = "0.10"
+rand = "0.8"
+rand_core = "0.6"
+rand_xoshiro = "0.6"
+strum = "0.24"
+strum_macros = "0.24"
 
 [profile.release]
 lto = "thin"
