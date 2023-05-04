@@ -18,10 +18,10 @@ use strum_macros;
 
 thread_local!(
     static FLAG: svg::Handle =
-        svg::Handle::from_memory(include_bytes!("../resources/flag.svg.gz").to_vec());
+        svg::Handle::from_memory(&include_bytes!("../resources/flag.svg.gz")[..]);
 
     static CROSSED_FLAG: svg::Handle =
-        svg::Handle::from_memory(include_bytes!("../resources/crossed_flag.svg.gz").to_vec())
+        svg::Handle::from_memory(&include_bytes!("../resources/crossed_flag.svg.gz")[..]);
 );
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, strum_macros::EnumIter)]
@@ -201,6 +201,33 @@ struct RunningView {
     start_time: Instant,
 }
 
+fn status_display<'a>(
+    minefield: &minefield::Minefield,
+    display_elements: impl Iterator<Item = iced::Element<'a, Message>>,
+) -> iced::Element<'a, Message> {
+    let mut info = widget::Column::new()
+        .spacing(10)
+        .width(iced::Length::Fill)
+        .push(
+            widget::Row::new()
+                .width(iced::Length::Shrink)
+                .align_items(iced_native::Alignment::Start)
+                .push(widget::Svg::new(FLAG.with(|f| f.clone())).width(iced::Length::Fixed(25.0)))
+                .push(widget::Text::new(format!(
+                    ": {}/{}",
+                    minefield.grid.counters.flag_count, minefield.mine_count
+                ))),
+        );
+
+    for e in display_elements {
+        info = info.push(e)
+    }
+
+    let button = widget::Button::new(widget::Text::new("Restart")).on_press(Message::Restart);
+
+    widget::Row::new().push(info).push(button).into()
+}
+
 impl RunningView {
     fn new() -> Self {
         RunningView {
@@ -211,28 +238,11 @@ impl RunningView {
     fn view(&self, minefield: &minefield::Minefield) -> iced::Element<Message> {
         let delta = Instant::now() - self.start_time;
 
-        let info = widget::Column::new()
-            .spacing(10)
-            .width(iced::Length::Fill)
-            .push(
-                widget::Row::new()
-                    .push(
-                        widget::Svg::new(FLAG.with(|f| f.clone()))
-                            .height(iced::Length::Fixed(25.0)),
-                    )
-                    .push(widget::Text::new(format!(
-                        ": {}/{}",
-                        minefield.grid.counters.flag_count, minefield.mine_count
-                    ))),
-            )
-            .push(widget::Text::new(format!(
-                "Ellapsed time: {} seconds",
-                delta.as_secs()
-            )));
-
-        let button = widget::Button::new(widget::Text::new("Restart")).on_press(Message::Restart);
-
-        widget::Row::new().push(info).push(button).into()
+        status_display(
+            minefield,
+            [widget::Text::new(format!("Ellapsed time: {} seconds", delta.as_secs())).into()]
+                .into_iter(),
+        )
     }
 }
 
@@ -250,36 +260,24 @@ impl EndGameView {
     }
 
     fn view(&self, minefield: &minefield::Minefield) -> iced::Element<Message> {
-        let info = widget::Column::new()
-            .spacing(10)
-            .width(iced::Length::Fill)
-            .push(
-                widget::Row::new()
-                    .push(
-                        widget::Svg::new(FLAG.with(|f| f.clone()))
-                            .height(iced::Length::Fixed(25.0)),
-                    )
-                    .push(widget::Text::new(format!(
-                        ": {}/{}",
-                        minefield.grid.counters.flag_count, minefield.mine_count
-                    ))),
-            )
-            .push(widget::Text::new(format!(
-                "Game time: {:0.06} seconds",
-                self.game_duration.as_secs_f64()
-            )))
-            .push(
+        status_display(
+            minefield,
+            [
+                widget::Text::new(format!(
+                    "Game time: {:0.06} seconds",
+                    self.game_duration.as_secs_f64()
+                ))
+                .into(),
                 widget::Text::new(if self.won {
                     "😄 You won! Congratulations!"
                 } else {
                     "😖 You lost! Try again..."
                 })
-                .size(40),
-            );
-
-        let button = widget::Button::new(widget::Text::new("Restart")).on_press(Message::Restart);
-
-        widget::Row::new().push(info).push(button).into()
+                .size(40)
+                .into(),
+            ]
+            .into_iter(),
+        )
     }
 }
 
@@ -518,15 +516,15 @@ impl Application for Minesweeper {
 
     fn view(&self) -> iced::Element<Self::Message> {
         // Minefield
-        let mut mf = widget::Column::new();
+        let mut mf = widget::Column::new().spacing(1);
         for (row, tiles) in (0u16..).zip(self.minefield.grid.rows()) {
-            let mut view_row = widget::Row::new();
+            let mut view_row = widget::Row::new().spacing(1);
             for (col, tile) in (0u16..).zip(tiles.iter()) {
                 view_row = view_row.push(
                     RightClickable::new(
                         create_button(tile, matches!(self.state, GameState::Finished(_)))
-                            .width(iced::Length::Fixed(30.0))
-                            .height(iced::Length::Fixed(30.0))
+                            .width(iced::Length::Fixed(29.0))
+                            .height(iced::Length::Fixed(29.0))
                             .on_press(Message::Reveal(row as u8, col as u8)),
                     )
                     .on_right_click(Message::Mark(row as u8, col as u8)),
