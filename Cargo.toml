@@ -10,7 +10,7 @@ bitvec = "1.0"
 delegate = "0.9"
 getrandom = "0.2"
 hex = "0.4"
-iced = {version = "0.9", features = ["svg", "tokio"]}
+iced = {version = "0.9", features = ["svg", "tokio", "glow"]}
 iced_native = "0.10"
 itertools = "0.10"
 rand = "0.8"
