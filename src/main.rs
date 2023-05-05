@@ -269,9 +269,9 @@ impl EndGameView {
                 ))
                 .into(),
                 widget::Text::new(if self.won {
-                    "😄 You won! Congratulations!"
+                    "You won! Congratulations!"
                 } else {
-                    "😖 You lost! Try again..."
+                    "You lost! Try again..."
                 })
                 .size(40)
                 .into(),
@@ -450,7 +450,7 @@ impl Application for Minesweeper {
     }
 
     fn title(&self) -> String {
-        String::from("Non-deterministic Minesweeper")
+        String::from("Mineswapper")
     }
 
     fn update(&mut self, message: Self::Message) -> iced::Command<Self::Message> {
