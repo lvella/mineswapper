@@ -1,13 +1,14 @@
 # Mineswapper: the non-deterministic minesweeper
 
-![name origin](mineswapper.png?raw=true)
+Tired of having to guess in a game of minesweeper? Worry no more... we present
+you **Mineswapper**!
 
-Tired of having to guess in a game of minesweeper? Worry no more!
+![name origin](mineswapper.png?raw=true)
 
 This is a variation of Minesweeper game where you only lose if the move is
 certainly wrong! This turns the game into a 100% logic game with no luck
 involved, and makes any ratio of mine/free space playable. This is a screenshot
-of a game with 50% mines where I went pretty far:
+of what the game looks like with 50% mine occupation:
 
 ![game with 50% mines](screenshot.png?raw=true "Ultra hard")
 
