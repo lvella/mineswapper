@@ -21,5 +21,9 @@ strum = "0.24"
 strum_macros = "0.24"
 
 [profile.release]
-#lto = "thin"
+lto = "thin"
 strip = true
+
+[profile.release-no-lto]
+inherits = "release"
+lto = false
