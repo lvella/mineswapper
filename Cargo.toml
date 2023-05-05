@@ -22,3 +22,4 @@ strum_macros = "0.24"
 
 [profile.release]
 lto = "thin"
+strip = true
