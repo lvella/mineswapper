@@ -3,6 +3,7 @@ name = "mineswapper"
 version = "1.0.0"
 authors = ["Lucas Clemente Vella <lvella@gmail.com>"]
 edition = "2021"
+license = "Apache-2.0"
 
 [dependencies]
 arrayvec = "0.7"

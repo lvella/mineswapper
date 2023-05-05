@@ -68,3 +68,7 @@ minutes of 100% CPU usage for your move to complete.
   
 - Scoreboard? Maybe online? Maybe use denuvo anti-cheat to prevent tampering
   with the scoreboard?
+
+## Licensing
+
+This work is licensed under [Apache License 2.0](http://www.apache.org/licenses/LICENSE-2.0).
